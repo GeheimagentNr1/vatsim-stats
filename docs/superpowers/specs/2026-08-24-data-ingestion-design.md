@@ -166,6 +166,39 @@ Maven-Multi-Modul (Spring Boot), analog zum Referenzprojekt
 Bewusst modular geschnitten, damit die spätere UI-Schicht und ggf. weitere
 Datenquellen andocken können, ohne Ingestion/Detection anzufassen.
 
+## Lokale Entwicklungsumgebung & Deployment
+
+- `docker-compose.yml` im Projekt-Root startet PostgreSQL mit vorinstalliertem
+  TimescaleDB-Plugin (Image `timescale/timescaledb:latest-pg16`) für lokales
+  Testen, mit persistentem Volume und Zugangsdaten über `.env`
+  (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`) statt Hardcoding im
+  Compose-File. `.env` selbst ist `.gitignore`t, `.env.example` mit
+  Platzhaltern wird committed.
+- Dieselbe Konfiguration (Image, Extension, Env-Var-Schema) ist Grundlage für
+  den Produktivbetrieb — der Live-Server nutzt denselben TimescaleDB-Image-
+  Typ, nur mit eigenen (nicht versionierten) Zugangsdaten. Kein separates
+  Schema-Setup für Dev vs. Prod nötig; Datenbank-Migrationen (z. B. Flyway)
+  laufen identisch gegen beide.
+- Die Anwendung selbst (Spring-Boot-App) läuft lokal weiterhin direkt über
+  `mvn spring-boot:run` (kein Container-Zwang für die App beim Entwickeln),
+  verbindet sich aber gegen die per Compose gestartete DB.
+
+## Verifikations-UI (Vaadin, intern)
+
+- Zum manuellen Prüfen der aufgezeichneten Daten während der Entwicklung
+  bekommt das `app`-Modul eine minimale Vaadin-Ansicht (Spring-Boot +
+  Vaadin, analog zum Referenzprojekt `vatsim-tools`): je ein `Grid` für
+  `pilot_session` (inkl. Drill-down auf die zugehörigen
+  `pilot_airport_event`-Einträge und `pilot_track_point`-Rohdaten einer
+  Session) sowie für `atc_session`.
+- Bewusst **kein** Vorgriff auf die spätere Vue-Produktiv-UI — kein
+  serverseitiges Paging/Filtern, keine Heatmaps/Charts, kein
+  Gestaltungsanspruch. Reines internes Debug-/Verifikationswerkzeug, um
+  die Ingestion- und Detection-Logik gegen echte Live-Daten zu
+  beobachten, ohne die eigentliche UI vorwegzunehmen.
+- Kann bei Bedarf entfernt werden, sobald die Vue-UI die gleiche
+  Funktionalität abdeckt; kein Bestandteil des öffentlichen Produkts.
+
 ## Testing-Strategie
 
 - Zustandsmaschine (Phasenerkennung, Schwellwert-Logik,
@@ -188,3 +221,7 @@ Datenquellen andocken können, ohne Ingestion/Detection anzufassen.
   unkritisch, spätere Optimierung möglich).
 - ATC-Frequenz-/Positionswechsel-Historie als eigene Detailauswertung
   (aktuell nur Login/Logout erfasst).
+- Interpolation zwischen zwei `pilot_track_point`-Einträgen (z. B. für ein
+  flüssigeres Replay zwischen zwei 15s-Samples) ist durch den in jedem
+  Punkt gespeicherten Zeitstempel bereits möglich, ohne zusätzliche
+  Speicherung — Umsetzung erfolgt bei Bedarf im Replay-Teilprojekt.
