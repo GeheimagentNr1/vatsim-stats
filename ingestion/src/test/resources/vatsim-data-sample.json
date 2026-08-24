@@ -1,0 +1,46 @@
+{
+  "pilots": [
+    {
+      "cid": 123456,
+      "callsign": "DLH400",
+      "latitude": 50.0264,
+      "longitude": 8.5431,
+      "altitude": 3000,
+      "groundspeed": 180,
+      "heading": 270,
+      "transponder": "2000",
+      "qnh_mb": 1013,
+      "logon_time": "2026-08-24T09:45:00.0000000Z",
+      "flight_plan": {
+        "flight_rules": "I",
+        "aircraft": "A320/M-SDE2E3FGHIRWXY/LB1",
+        "aircraft_short": "A320",
+        "departure": "EDDF",
+        "arrival": "EDDM"
+      }
+    },
+    {
+      "cid": 654321,
+      "callsign": "DEABC",
+      "latitude": 48.35,
+      "longitude": 11.78,
+      "altitude": 1200,
+      "groundspeed": 60,
+      "heading": 90,
+      "transponder": "7000",
+      "qnh_mb": 1015,
+      "logon_time": "2026-08-24T09:50:00.0000000Z",
+      "flight_plan": null
+    }
+  ],
+  "controllers": [
+    {
+      "cid": 111222,
+      "callsign": "EDDF_TWR",
+      "frequency": "119.900",
+      "facility": 4,
+      "visual_range": 50,
+      "logon_time": "2026-08-24T09:00:00.0000000Z"
+    }
+  ]
+}
