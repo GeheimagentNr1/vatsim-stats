@@ -1,0 +1,190 @@
+# VATSIM-Statistik-Tool — Design: Datenaufzeichnung (Ingestion & Phasenerkennung)
+
+Status: Approved (Design-Review abgeschlossen, 2026-08-24)
+
+## Zweck
+
+Erstes Teilprojekt vor der UI: zuverlässige, dauerhafte Aufzeichnung von
+VATSIM-Piloten- und ATC-Sessions inklusive Flugrouten und automatischer
+Erkennung von Start-/Lande-/Touch-and-Go-Ereignissen an Flughäfen. Dient als
+Datenbasis für spätere Statistiken (Heatmaps, Session-Abfragen, Replay).
+
+## Nicht-Ziele (für dieses Teilprojekt)
+
+- Keine UI (Web-Frontend folgt als eigenes Teilprojekt).
+- Keine Runway-genaue Zuordnung (nur Airport-Ebene) — spätere Erweiterung.
+- Keine Nutzung der VATSIM Core API / OAuth (nur der offene Data Feed
+  `data.vatsim.net/v3/vatsim-data.json`).
+
+## Referenzdaten: OurAirports
+
+- Täglicher automatischer Scheduled-Job lädt `airports.csv` und
+  `runways.csv` von ourairports.com herunter und upsertet sie in die
+  Tabellen `airport` und `runway` (ICAO/IATA, Name, Latitude, Longitude,
+  Elevation in ft, Land; Runways werden bereits jetzt mitgespeichert, auch
+  ohne aktuelle Nutzung, als Vorbereitung für spätere Runway-Erkennung).
+- Schlägt der Import fehl (Datei nicht erreichbar, Format geändert), bleibt
+  der bisherige Datenbestand unverändert bestehen; der Fehler wird geloggt
+  und fließt in den Alerting-Mechanismus ein (siehe unten). Kein Blockieren
+  der laufenden Ingestion.
+
+## Datenmodell
+
+### Rohdaten (append-only, TimescaleDB-Hypertables)
+
+- `pilot_track_point`: Zeitstempel, CID, Callsign, `logon_time`, lat/lon,
+  altitude, groundspeed, heading, transponder, QNH sowie die zum
+  Zeitpunkt aktuellen Flugplanfelder (Departure/Destination/Aircraft, s.
+  `aircraft_short`) — ein Datensatz pro Poll-Zyklus pro aktivem Piloten.
+- `atc_snapshot`: Zeitstempel, CID, Callsign, `logon_time`, Frequenz,
+  Facility-Typ, Range, lat/lon — ein Datensatz pro Poll-Zyklus pro aktivem
+  Controller.
+- Beide Tabellen sind reine, uninterpretierte Kopien der Feed-Antwort.
+  Rohdaten werden **immer** vollständig persistiert, unabhängig vom Erfolg
+  der nachgelagerten Ableitungslogik — sie sind die alleinige Quelle der
+  Wahrheit und erlauben, Ableitungslogik jederzeit rückwirkend neu
+  anzuwenden.
+
+### Abgeleitete Daten
+
+- `pilot_session`: eine Zeile pro zusammenhängender Pilotenverbindung
+  (nicht zwingend ein einzelner Flug — siehe Session-Grenzen unten). CID,
+  Callsign, `logon_time`, zuletzt bekannter Flugplan (geplantes
+  Departure/Destination, `aircraft_short`), Session-Start/-Ende, Status
+  (`ACTIVE`, `COMPLETED`). `departure`/`destination` als rein informative,
+  abgeleitete Felder aus dem ersten `TAKEOFF`- bzw. letzten `LANDING`-Event
+  derselben Session (s.u.) — nicht die Quelle für Bewegungsstatistik.
+- `pilot_airport_event`: eine Zeile pro erkannter Flughafen-Bewegung —
+  Session-Referenz, Airport (ICAO, per Nächster-Nachbar-Suche ermittelt),
+  Event-Typ (`TAKEOFF`, `LANDING`, `TOUCH_AND_GO`, `LOW_APPROACH`),
+  Zeitstempel (des ersten beobachteten Boden-/Übergangs-Polls). Ist die
+  Quelle der Wahrheit für Flughafen-Bewegungsstatistik — jeder
+  Touch-and-Go zählt als eigene Bewegung, auch innerhalb derselben Session.
+- `atc_session`: eine Zeile pro ATC-Session — CID, Callsign/Position,
+  `logon_time`, Facility, Login-/Logout-Zeitpunkt.
+
+### Session-Schlüssel und -Grenzen
+
+- Natürlicher Schlüssel für eine zusammenhängende Verbindung: **CID +
+  Callsign + `logon_time`** (Callsign allein ist nur zu einem Zeitpunkt
+  eindeutig, nicht über einen Tag; `logon_time` liefert die stabile
+  Unterscheidung bei mehrfacher Nutzung desselben Callsigns an
+  unterschiedlichen Tageszeiten).
+- Session-Grenzen werden primär durch die **physische Phasenerkennung**
+  bestimmt (Boden → Luft → Boden), nicht durch Flugplan-Änderungen:
+  - Ändert sich der Flugplan (Departure/Destination), während die Session
+    `AIRBORNE` ist (Diversion, Local-IFR/VFR-Platzrunden) → nur Update der
+    laufenden Session, **keine** neue Session.
+  - Eine neue Session entsteht nur, wenn (a) der Pilot mit neuer
+    `logon_time` im Feed erscheint, oder (b) eine vorherige Session bereits
+    `COMPLETED` ist (finale Landung erkannt, s.u.) **und** danach ein
+    neuer/geänderter Flugplan gesendet wird, ohne dass disconnected wurde
+    (Refile am Boden nach Landung, Vorbereitung des nächsten Flugs).
+- VFR ohne Flugplan: `departure`/`destination` werden ausschließlich aus
+  den positionsbasiert erkannten `pilot_airport_event`-Einträgen abgeleitet,
+  nicht aus Flugplanfeldern (die dann leer/`null` sind).
+
+## Phasenerkennung (Zustandsmaschine)
+
+- Pro aktiver Session (Schlüssel s.o.) wird ein In-Memory-State geführt:
+  `ON_GROUND`, `AIRBORNE`, `GROUND_PENDING` (Zwischenzustand zur
+  Verweildauer-Beobachtung nach einer Boden-Berührung).
+- Boden-Erkennung je Trackpunkt: `groundspeed < 40kt` **und**
+  `altitude ≤ nächstgelegener_airport.elevation + 200ft`. Nächstgelegener
+  Airport per Haversine-Distanz aus der `airport`-Tabelle, Kandidaten nur
+  innerhalb ~5nm.
+- Übergang `AIRBORNE → ON_GROUND`: State wechselt zu `GROUND_PENDING`,
+  Zeitpunkt des ersten Boden-Polls wird gemerkt.
+  - Bleibt der Zustand `ON_GROUND` für eine Mindestverweildauer (Default
+    **90 Sekunden**, konfigurierbar) **oder** verschwindet der Pilot aus
+    dem Feed, während `GROUND_PENDING` aktiv ist → Event `LANDING` wird
+    geschrieben (Zeitstempel = erster Boden-Poll), Session-Status kann auf
+    `COMPLETED` gesetzt werden.
+  - Wird `AIRBORNE` erreicht, bevor die Verweildauer erreicht ist → Event
+    `TOUCH_AND_GO` (Groundspeed war tatsächlich < 40kt) oder
+    `LOW_APPROACH` (Höhe niedrig, aber Groundspeed nie unter Schwelle)
+    wird geschrieben, State zurück zu `AIRBORNE`, Session bleibt `ACTIVE`.
+- Übergang `ON_GROUND → AIRBORNE` (aus bestätigtem `ON_GROUND`, nicht aus
+  `GROUND_PENDING`) → Event `TAKEOFF`.
+- ATC-Sessions benötigen kein Phasenmodell: Session wird eröffnet, sobald
+  CID+Callsign+`logon_time` neu erscheint, geschlossen, sobald es
+  verschwindet (Logout-Zeitpunkt = letzter gesehener Poll). Frequenzwechsel
+  auf derselben `logon_time` aktualisiert nur die laufende Session.
+
+## Ingestion-Poller
+
+- `@Scheduled`-Task, alle 15 Sekunden: ruft
+  `https://data.vatsim.net/v3/vatsim-data.json` ab, parst `pilots[]` und
+  `controllers[]`.
+- Pro Zyklus: Bulk-Insert aller Rohdatensätze in einer Transaktion, **vor**
+  jeder Ableitungslogik. Damit sind Rohdaten garantiert persistiert, bevor
+  irgendeine Interpretation stattfindet.
+- Einzelne fehlerhafte/unvollständige Datensätze innerhalb eines Zyklus
+  (z. B. Pilot ohne Position) werden übersprungen und geloggt, ohne den
+  restlichen Zyklus zu verwerfen.
+- Netzwerkfehler/Timeout/5xx beim Feed-Abruf: Zyklus überspringen, loggen,
+  nächster Versuch in 15s (kein Retry-Sturm).
+- DB kurzzeitig nicht erreichbar: Zyklus-Fehler loggen und überspringen,
+  kein mehrzyklisches In-Memory-Puffern (Komplexität lohnt sich bei einem
+  15s-Sample-Intervall nicht).
+
+## Restart-Robustheit
+
+- Da Rohdaten unabhängig vom In-Memory-State sofort persistiert werden,
+  geht bei Absturz/Neustart höchstens der zuletzt nicht verarbeitete
+  Poll-Zyklus an *abgeleiteten* Events verloren — nie Rohdaten.
+- Beim Start lädt der Service für jeden im ersten Poll vorkommenden
+  Piloten/Controller die letzten 5–10 `pilot_track_point`-Zeilen (gefiltert
+  nach `logon_time`) aus der DB und rekonstruiert daraus Phase und
+  `groundSinceTimestamp`. Für ATC wird die letzte offene `atc_session`
+  geladen. Ohne Historie (neuer Teilnehmer) startet der State neutral.
+
+## Alerting
+
+- `HealthMonitor`-Service merkt sich je Datenquelle (`vatsim-poll`,
+  `ourairports-import`) den Zeitpunkt des letzten erfolgreichen Laufs.
+- Ein minütlicher Check prüft: liegt der letzte Erfolg von `vatsim-poll`
+  länger als 5 Minuten zurück, oder ist der tägliche
+  `ourairports-import` ausgeblieben/fehlgeschlagen → E-Mail-Alert (Spring
+  Mail, SMTP-Konfiguration und Empfänger über `application.yml`/Env-Var).
+- Alert wird nur einmal beim Überschreiten der Schwelle verschickt (kein
+  Spam bei anhaltendem Ausfall); optional eine "wieder OK"-Mail beim
+  Erholen.
+
+## Projektstruktur
+
+Maven-Multi-Modul (Spring Boot), analog zum Referenzprojekt
+`vatsim-tools`, aber eigenständig für `vatsim-stats`:
+
+- `ingestion` — Poller, VATSIM-API-Client, Rohdaten-Persistenz
+- `detection` — Zustandsmaschine, Event-Ableitung (reines Java, ohne
+  Spring-Abhängigkeit, unabhängig testbar)
+- `reference-data` — OurAirports-Import-Job, Airport-/Runway-Repository
+- `monitoring` — HealthMonitor, E-Mail-Alerting
+- `app` — Spring-Boot-Entry-Point, verdrahtet alle Module
+
+Bewusst modular geschnitten, damit die spätere UI-Schicht und ggf. weitere
+Datenquellen andocken können, ohne Ingestion/Detection anzufassen.
+
+## Testing-Strategie
+
+- Zustandsmaschine (Phasenerkennung, Schwellwert-Logik,
+  Touch-and-Go-Klassifizierung): Unit-Tests mit synthetischen
+  Trackpunkt-Sequenzen (TDD), unabhängig von Spring/DB.
+- Airport-Nächster-Nachbar-Suche (Haversine): separat unit-testbar mit
+  bekannten Koordinaten.
+- Poller/Persistenz-Schicht: Integrationstests gegen eine echte
+  Test-PostgreSQL/TimescaleDB-Instanz (Testcontainers), inklusive
+  Neustart-Rekonstruktion (State aus DB neu aufbauen und mit erwartetem
+  State vergleichen).
+- Kein Live-Aufruf der echten VATSIM-API in Tests — injizierter/gemockter
+  Client mit JSON-Fixtures (reale, ggf. anonymisierte Ausschnitte).
+
+## Offene Punkte für spätere Teilprojekte
+
+- Runway-genaue Zuordnung von Start-/Landeereignissen.
+- UI/Frontend (Vue 3, siehe Projekt-CLAUDE.md).
+- Genaue TimescaleDB-Kompressions-/Retention-Policy (Datenvolumen zunächst
+  unkritisch, spätere Optimierung möglich).
+- ATC-Frequenz-/Positionswechsel-Historie als eigene Detailauswertung
+  (aktuell nur Login/Logout erfasst).
