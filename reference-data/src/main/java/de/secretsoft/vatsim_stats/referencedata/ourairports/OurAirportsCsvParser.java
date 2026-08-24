@@ -3,7 +3,6 @@ package de.secretsoft.vatsim_stats.referencedata.ourairports;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
-import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -12,7 +11,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-@Component
 public class OurAirportsCsvParser {
 
     private static final Set<String> RELEVANT_AIRPORT_TYPES =
