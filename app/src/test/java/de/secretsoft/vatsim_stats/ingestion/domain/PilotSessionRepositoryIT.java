@@ -1,5 +1,6 @@
 package de.secretsoft.vatsim_stats.ingestion.domain;
 
+import de.secretsoft.vatsim_stats.VatsimStatsApplication;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -17,7 +18,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
-@SpringBootTest( classes = TestConfiguration.class )
+@SpringBootTest( classes = VatsimStatsApplication.class )
 class PilotSessionRepositoryIT {
 
     @Container
