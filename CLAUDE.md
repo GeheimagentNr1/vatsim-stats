@@ -102,6 +102,22 @@ mit einfacher Heatmap — überschaubar genug zum Lernen, direkt wiederverwendba
 für das VATSIM-Tool, falls man sich später doch für Vaadin entscheidet oder
 Teile davon prototypisch testen will.
 
+## Build & Test
+
+`mvn` ist auf dieser Maschine nicht im PATH, und der Standard-`JAVA_HOME` zeigt
+auf eine zu alte Java-Version (dieses Projekt braucht Java 21). Beides explizit
+setzen:
+
+```bash
+export JAVA_HOME="C:/Program Files/Eclipse Adoptium/jdk-21.0.12.8-hotspot"
+MVN="/c/Users/mbranz/AppData/Local/Programs/IntelliJ IDEA Ultimate/plugins/maven-plugin/lib/maven3/bin/mvn.cmd"
+```
+
+```bash
+"$MVN" -q clean install          # gesamter Build inkl. Tests, alle Module
+"$MVN" -q -pl app -am test -Dtest=ClassName   # einzelne Testklasse
+```
+
 ## Offene Punkte
 
 - [ ] Ist das Replay-Feature tatsächlich im Scope? (Noch nicht final entschieden)
