@@ -192,8 +192,17 @@ kein Container-Zwang für die App selbst; Vaadin-Verifikations-UI dann unter
 `http://localhost:8080`):
 
 ```bash
-"$MVN" -q -pl app -am spring-boot:run
+"$MVN" -q clean install -DskipTests   # einmalig: alle Module ins lokale Repo installieren
+"$MVN" -pl app org.springframework.boot:spring-boot-maven-plugin:run
 ```
+
+**Achtung:** `-pl app -am spring-boot:run` (Prefix-Form) schlägt fehl mit
+`No plugin found for prefix 'spring-boot'` — mit `-am` behandelt Maven das
+Parent-POM als "aktuelles Projekt" für die Prefix-Auflösung, wo das Plugin
+nicht deklariert ist. Stattdessen entweder Module vorher separat
+installieren und `-pl app` **ohne** `-am` verwenden, oder direkt die volle
+Plugin-Koordinate (`org.springframework.boot:spring-boot-maven-plugin:run`)
+angeben wie oben.
 
 ## Offene Punkte
 
