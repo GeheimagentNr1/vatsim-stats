@@ -90,13 +90,18 @@ Erkennung von Start-/Lande-/Touch-and-Go-Ereignissen. Vollständiges Design:
   testbar: `PilotPhaseStateMachine` (Zustandsmaschine `ON_GROUND` /
   `AIRBORNE` / `GROUND_PENDING`, leitet `TAKEOFF`/`LANDING`/
   `TOUCH_AND_GO`/`LOW_APPROACH`-Events aus einer Folge von `TrackSample`s
-  ab), `NearestAirportLookup` (Haversine-basierte Nächster-Nachbar-Suche,
-  ~5nm-Bounding-Box-Vorfilter), `PhaseDetectionConfig`.
+  ab), `NearestAirportLookup` (reines Interface), `PhaseDetectionConfig`.
+  Die tatsächliche Haversine-Implementierung mit Bounding-Box-Vorfilter
+  liegt als Spring-`@Component` in `ingestion` (s. u.), da sie
+  `AirportRepository` (JPA) benötigt.
 - **`ingestion`** — `IngestionPoller` (`@Scheduled`, alle 15s, ruft
   `VatsimDataFeedClient` gegen `https://data.vatsim.net/v3/vatsim-data.json`
   auf), `PilotSessionOrchestrator` (verdrahtet Rohdaten-Persistenz +
   `PilotPhaseStateMachine` + Session-/Event-Ableitung), `AtcSessionTracker`
-  (einfachere Login/Logout-Session-Logik für ATC, kein Phasenmodell nötig).
+  (einfachere Login/Logout-Session-Logik für ATC, kein Phasenmodell nötig),
+  `AirportRepositoryLookup` (`ingestion.session`, implementiert
+  `detection`s `NearestAirportLookup`-Interface: ~5nm-Bounding-Box-SQL-
+  Vorfilter via `AirportRepository`, dann exakte Haversine-Rangfolge).
   JPA-Entities/Repositories unter `ingestion.domain`
   (`PilotSession`, `PilotTrackPoint`, `PilotAirportEvent`, `AtcSession`,
   `AtcSnapshot`).
