@@ -42,7 +42,7 @@ class OurAirportsImportIT {
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
-        DockerImageName.parse( "timescale/timescaledb:latest-pg16" ).asCompatibleSubstituteFor( "postgres" ) );
+        DockerImageName.parse( "timescale/timescaledb:latest-pg18" ).asCompatibleSubstituteFor( "postgres" ) );
 
     @DynamicPropertySource
     static void datasourceProperties( DynamicPropertyRegistry registry ) {

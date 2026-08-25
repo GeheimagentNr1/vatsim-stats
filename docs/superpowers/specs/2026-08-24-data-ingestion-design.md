@@ -238,7 +238,7 @@ Datenquellen andocken können, ohne Ingestion/Detection anzufassen.
 ## Lokale Entwicklungsumgebung & Deployment
 
 - `docker-compose.yml` im Projekt-Root startet PostgreSQL mit vorinstalliertem
-  TimescaleDB-Plugin (Image `timescale/timescaledb:latest-pg16`) für lokales
+  TimescaleDB-Plugin (Image `timescale/timescaledb:latest-pg18`) für lokales
   Testen, mit persistentem Volume und Zugangsdaten über `.env`
   (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`) statt Hardcoding im
   Compose-File. `.env` selbst ist `.gitignore`t, `.env.example` mit
