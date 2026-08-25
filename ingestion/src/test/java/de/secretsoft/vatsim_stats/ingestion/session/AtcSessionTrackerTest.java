@@ -136,6 +136,37 @@ class AtcSessionTrackerTest {
         assertThat( session.getEndedAt() ).isEqualTo( LOGON );
     }
 
+    private AtcSnapshot snapshot( String callsign, long cid, int offsetSeconds ) {
+        return AtcSnapshot.builder()
+            .recordedAt( LOGON.plusSeconds( offsetSeconds ) )
+            .cid( cid )
+            .callsign( callsign )
+            .logonTime( LOGON )
+            .frequency( "119.900" )
+            .facility( 4 )
+            .build();
+    }
+
+    @Test
+    void missedCyclesAreTrackedIndependentlyPerController() {
+        tracker.processSnapshots( List.of(
+            snapshot( "EDDF_TWR", 111222L, 0 ),
+            snapshot( "EDDM_TWR", 333444L, 0 ) ) );
+
+        // EDDF_TWR keeps appearing; EDDM_TWR goes silent for 4 consecutive cycles.
+        tracker.processSnapshots( List.of( snapshot( "EDDF_TWR", 111222L, 15 ) ) );
+        tracker.processSnapshots( List.of( snapshot( "EDDF_TWR", 111222L, 30 ) ) );
+        tracker.processSnapshots( List.of( snapshot( "EDDF_TWR", 111222L, 45 ) ) );
+        tracker.processSnapshots( List.of( snapshot( "EDDF_TWR", 111222L, 60 ) ) );
+
+        Map<String, AtcSession> byCallsign = new HashMap<>();
+        for( AtcSession session : repository.all() ) {
+            byCallsign.put( session.getCallsign(), session );
+        }
+        assertThat( byCallsign.get( "EDDF_TWR" ).getEndedAt() ).isNull();
+        assertThat( byCallsign.get( "EDDM_TWR" ).getEndedAt() ).isEqualTo( LOGON );
+    }
+
     @Test
     void reopensTheExistingSessionWhenTheSameControllerReappearsAfterMissedCycles() {
         tracker.processSnapshots( List.of( snapshot( 0 ) ) );

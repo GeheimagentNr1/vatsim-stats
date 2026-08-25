@@ -64,8 +64,9 @@ public class PilotSessionTimeoutSweeper {
 
     /**
      * The last known activity for this specific leg, bounded to track points recorded at or after
-     * the leg's own {@code startedAt} — see {@link PilotTrackPointRepository
-     * #findTopByCidAndCallsignAndLogonTimeAndRecordedAtGreaterThanEqualOrderByRecordedAtDesc} for why
+     * the leg's own {@code startedAt} — see
+     * {@link PilotTrackPointRepository#findTopByCidAndCallsignAndLogonTimeAndRecordedAtGreaterThanEqualOrderByRecordedAtDesc}
+     * for why
      * the bound is required whenever multiple legs share one (cid, callsign, logonTime) natural key.
      */
     private Instant lastKnownActivity( PilotSession session ) {
