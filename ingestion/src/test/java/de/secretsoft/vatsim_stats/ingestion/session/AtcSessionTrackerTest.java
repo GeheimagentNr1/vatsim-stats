@@ -3,6 +3,7 @@ package de.secretsoft.vatsim_stats.ingestion.session;
 import de.secretsoft.vatsim_stats.ingestion.domain.AtcSession;
 import de.secretsoft.vatsim_stats.ingestion.domain.AtcSessionRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.AtcSnapshot;
+import de.secretsoft.vatsim_stats.ingestion.domain.AtcSnapshotRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -14,18 +15,22 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AtcSessionTrackerTest {
 
     private static final Instant LOGON = Instant.parse( "2026-08-24T09:00:00Z" );
 
     private FakeAtcSessionRepository repository;
+    private AtcSnapshotRepository snapshotRepository;
     private AtcSessionTracker tracker;
 
     @BeforeEach
     void setUp() {
         repository = new FakeAtcSessionRepository();
-        tracker = new AtcSessionTracker( repository );
+        snapshotRepository = mock( AtcSnapshotRepository.class );
+        tracker = new AtcSessionTracker( repository, snapshotRepository );
     }
 
     private AtcSnapshot snapshot( int offsetSeconds ) {
@@ -61,17 +66,51 @@ class AtcSessionTrackerTest {
     }
 
     @Test
-    void reconstructsOpenSessionsOnStartup() {
+    void reconstructsOpenSessionsOnStartupAndClosesThemAtTheLastRecordedSnapshot() {
+        repository.save( AtcSession.builder()
+            .cid( 111222L ).callsign( "EDDF_TWR" ).logonTime( LOGON )
+            .facility( 4 ).startedAt( LOGON ).build() );
+        AtcSnapshotRepository snapshots = mock( AtcSnapshotRepository.class );
+        when( snapshots.findTopByCidAndCallsignAndLogonTimeOrderByRecordedAtDesc( 111222L, "EDDF_TWR", LOGON ) )
+            .thenReturn( Optional.of( snapshot( 3600 ) ) );
+
+        AtcSessionTracker restarted = new AtcSessionTracker( repository, snapshots );
+        restarted.reconstructOpenSessions();
+        restarted.processSnapshots( List.of() );
+
+        AtcSession session = repository.all().get( 0 );
+        assertThat( session.getEndedAt() ).isEqualTo( LOGON.plusSeconds( 3600 ) );
+    }
+
+    @Test
+    void fallsBackToStartedAtWhenNoSnapshotExistsForAReconstructedSession() {
         repository.save( AtcSession.builder()
             .cid( 111222L ).callsign( "EDDF_TWR" ).logonTime( LOGON )
             .facility( 4 ).startedAt( LOGON ).build() );
 
-        AtcSessionTracker restarted = new AtcSessionTracker( repository );
+        AtcSessionTracker restarted = new AtcSessionTracker( repository, mock( AtcSnapshotRepository.class ) );
         restarted.reconstructOpenSessions();
         restarted.processSnapshots( List.of() );
 
         AtcSession session = repository.all().get( 0 );
         assertThat( session.getEndedAt() ).isEqualTo( LOGON );
+    }
+
+    @Test
+    void reopensTheExistingSessionWhenTheSameControllerReappearsAfterAMissedCycle() {
+        tracker.processSnapshots( List.of( snapshot( 0 ) ) );
+        tracker.processSnapshots( List.of() );
+        assertThat( repository.all().get( 0 ).getEndedAt() ).isEqualTo( LOGON );
+
+        tracker.processSnapshots( List.of( snapshot( 30 ) ) );
+
+        assertThat( repository.all() ).hasSize( 1 );
+        assertThat( repository.all().get( 0 ).getEndedAt() ).isNull();
+        assertThat( repository.all().get( 0 ).getStartedAt() ).isEqualTo( LOGON );
+
+        tracker.processSnapshots( List.of() );
+        assertThat( repository.all() ).hasSize( 1 );
+        assertThat( repository.all().get( 0 ).getEndedAt() ).isEqualTo( LOGON.plusSeconds( 30 ) );
     }
 
     private static class FakeAtcSessionRepository implements AtcSessionRepository {
