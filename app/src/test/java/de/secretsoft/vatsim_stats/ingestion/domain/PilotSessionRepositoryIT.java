@@ -18,7 +18,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
-@SpringBootTest( classes = VatsimStatsApplication.class )
+@SpringBootTest( classes = VatsimStatsApplication.class, properties = "vatsim.scheduling.enabled=false" )
 class PilotSessionRepositoryIT {
 
     @Container

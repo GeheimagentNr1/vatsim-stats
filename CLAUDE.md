@@ -180,8 +180,17 @@ MVN="/c/Users/mbranz/AppData/Local/Programs/IntelliJ IDEA Ultimate/plugins/maven
 
 ```bash
 "$MVN" -q clean install          # gesamter Build inkl. Tests, alle Module
-"$MVN" -q -pl app -am test -Dtest=ClassName   # einzelne Testklasse
+"$MVN" -q -pl app -am test -Dtest=ClassName -Dsurefire.failIfNoSpecifiedTests=false   # einzelne Testklasse
 ```
+
+### Scheduling in Tests abschalten
+
+Spring Boot 4.0.6 kennt **kein** `spring.task.scheduling.enabled`. Stattdessen
+liegt `@EnableScheduling` in `app/.../SchedulingConfig.java` und ist über
+`@ConditionalOnProperty` an das Property `vatsim.scheduling.enabled`
+(Default: `true`) gekoppelt. Jeder `@SpringBootTest` muss
+`vatsim.scheduling.enabled=false` setzen, sonst laufen im Hintergrund echte
+Poll-Zyklen gegen die Live-VATSIM-API.
 
 **Lokale Datenbank starten** (vor `spring-boot:run` bzw. Integrationstests
 mit Testcontainers/echter DB nötig; `.env` mit `POSTGRES_USER`,

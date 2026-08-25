@@ -3,11 +3,10 @@ package de.secretsoft.vatsim_stats;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
-import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.time.Clock;
 
-@EnableScheduling
+// Scheduling lives in SchedulingConfig so it can be switched off in tests.
 @SpringBootApplication(scanBasePackages = "de.secretsoft.vatsim_stats")
 public class VatsimStatsApplication {
 

@@ -41,7 +41,11 @@ import static org.mockito.Mockito.when;
 @Testcontainers
 @SpringBootTest(
     classes = { VatsimStatsApplication.class, IngestionEndToEndIT.TestClockConfig.class },
-    properties = { "spring.main.allow-bean-definition-overriding=true" }
+    properties = {
+        "spring.main.allow-bean-definition-overriding=true",
+        // No background scheduler: this test drives poller.pollOnce() by hand.
+        "vatsim.scheduling.enabled=false"
+    }
 )
 class IngestionEndToEndIT {
 
