@@ -1,7 +1,9 @@
 package de.secretsoft.vatsim_stats.ingestion.session;
 
+import de.secretsoft.vatsim_stats.detection.AirportEventType;
 import de.secretsoft.vatsim_stats.detection.AirportRef;
 import de.secretsoft.vatsim_stats.detection.NearestAirportLookup;
+import de.secretsoft.vatsim_stats.ingestion.domain.PilotAirportEvent;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotAirportEventRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotSession;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPoint;
@@ -9,6 +11,7 @@ import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPointRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.SessionStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.List;
@@ -16,6 +19,8 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PilotSessionOrchestratorTest {
@@ -110,6 +115,67 @@ class PilotSessionOrchestratorTest {
             .orElseThrow();
         assertThat( secondLeg.getSequenceNumber() ).isEqualTo( 1 );
         assertThat( secondLeg.getStatus() ).isEqualTo( SessionStatus.ACTIVE );
+    }
+
+    @Test
+    void disappearingFromTheFeedWhileGroundPendingCompletesTheSessionWithALanding() {
+        orchestrator.processTrackPoints( List.of( point( 0, 3000, 250, "EDDF", "EDDM" ) ) );
+        // One ground point puts the state machine into GROUND_PENDING (dwell threshold not reached).
+        orchestrator.processTrackPoints( List.of( point( 15, 550, 15, "EDDF", "EDDM" ) ) );
+
+        PilotSession pending = sessionRepository
+            .findFirstByCidAndCallsignAndLogonTimeOrderBySequenceNumberDesc( 123456L, "DLH400", LOGON )
+            .orElseThrow();
+        assertThat( pending.getStatus() ).isEqualTo( SessionStatus.ACTIVE );
+        assertThat( orchestrator.trackedPilotCount() ).isEqualTo( 1 );
+
+        // The pilot is absent from the next cycle's batch -> disconnect.
+        orchestrator.processTrackPoints( List.of() );
+
+        ArgumentCaptor<PilotAirportEvent> eventCaptor = ArgumentCaptor.forClass( PilotAirportEvent.class );
+        verify( eventRepository ).save( eventCaptor.capture() );
+        assertThat( eventCaptor.getValue().getEventType() ).isEqualTo( AirportEventType.LANDING );
+        assertThat( eventCaptor.getValue().getAirportIcao() ).isEqualTo( "EDDF" );
+        assertThat( eventCaptor.getValue().getOccurredAt() ).isEqualTo( LOGON.plusSeconds( 15 ) );
+
+        PilotSession completed = sessionRepository
+            .findFirstByCidAndCallsignAndLogonTimeOrderBySequenceNumberDesc( 123456L, "DLH400", LOGON )
+            .orElseThrow();
+        assertThat( completed.getStatus() ).isEqualTo( SessionStatus.COMPLETED );
+        assertThat( completed.getEndedAt() ).isEqualTo( LOGON.plusSeconds( 15 ) );
+        assertThat( orchestrator.trackedPilotCount() ).isZero();
+    }
+
+    @Test
+    void aPilotReappearingAfterEvictionStartsFromAFreshStateMachine() {
+        orchestrator.processTrackPoints( List.of( point( 0, 3000, 250, "EDDF", "EDDM" ) ) );
+        orchestrator.processTrackPoints( List.of( point( 15, 550, 15, "EDDF", "EDDM" ) ) );
+        orchestrator.processTrackPoints( List.of() );
+        assertThat( orchestrator.trackedPilotCount() ).isZero();
+
+        // If stale GROUND_PENDING state had survived, this single ground point would immediately
+        // exceed the dwell threshold and emit a second LANDING. A fresh machine only initialises.
+        orchestrator.processTrackPoints( List.of( point( 300, 550, 15, "EDDF", "EDDM" ) ) );
+
+        verify( eventRepository, times( 1 ) ).save( org.mockito.ArgumentMatchers.any() );
+        assertThat( orchestrator.trackedPilotCount() ).isEqualTo( 1 );
+    }
+
+    @Test
+    void otherPilotsInTheSameCycleAreNotClosed() {
+        PilotTrackPoint other = PilotTrackPoint.builder()
+            .recordedAt( LOGON ).cid( 999L ).callsign( "BAW1" ).logonTime( LOGON )
+            .latitude( 50.0 ).longitude( 8.5 ).altitudeFt( 3000 ).groundspeedKt( 250 ).build();
+
+        orchestrator.processTrackPoints( List.of( point( 0, 3000, 250, "EDDF", "EDDM" ), other ) );
+        assertThat( orchestrator.trackedPilotCount() ).isEqualTo( 2 );
+
+        orchestrator.processTrackPoints( List.of( point( 15, 3000, 250, "EDDF", "EDDM" ) ) );
+
+        assertThat( orchestrator.trackedPilotCount() ).isEqualTo( 1 );
+        assertThat( sessionRepository
+            .findFirstByCidAndCallsignAndLogonTimeOrderBySequenceNumberDesc( 123456L, "DLH400", LOGON )
+            .orElseThrow().getStatus() ).isEqualTo( SessionStatus.ACTIVE );
     }
 
     @Test

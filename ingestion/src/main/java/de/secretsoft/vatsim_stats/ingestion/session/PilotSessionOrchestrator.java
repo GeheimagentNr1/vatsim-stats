@@ -20,8 +20,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -37,11 +39,58 @@ public class PilotSessionOrchestrator {
     private final ConcurrentMap<SessionKey, PilotPhaseStateMachine> stateMachines = new ConcurrentHashMap<>();
     private final ConcurrentMap<SessionKey, PilotSession> currentSessions = new ConcurrentHashMap<>();
 
+    /**
+     * Processes one complete poll cycle's worth of track points. Every pilot present in the feed for
+     * this cycle must be contained in {@code trackPoints} — pilots tracked in memory but missing from
+     * this list are treated as disconnected from the feed and are closed and evicted.
+     */
     @Transactional
     public void processTrackPoints( List<PilotTrackPoint> trackPoints ) {
+        Set<SessionKey> seenThisCycle = new HashSet<>();
         for( PilotTrackPoint point : trackPoints ) {
+            seenThisCycle.add( new SessionKey( point.getCid(), point.getCallsign(), point.getLogonTime() ) );
             handleTrackPoint( point );
         }
+        closeSessionsNotSeen( seenThisCycle );
+    }
+
+    /**
+     * Closes and evicts every tracked pilot that was not present in the current poll cycle. A pilot
+     * that vanishes while {@code GROUND_PENDING} yields a {@code LANDING} event (see the phase
+     * detection spec); the state machine and session are then dropped from memory so the maps do not
+     * grow without bound. A later reappearance of the same key correctly starts from a fresh state
+     * machine and re-loads/creates the session via {@link #loadOrCreateSession}.
+     */
+    private void closeSessionsNotSeen( Set<SessionKey> seenThisCycle ) {
+        for( SessionKey key : Set.copyOf( stateMachines.keySet() ) ) {
+            if( seenThisCycle.contains( key ) ) {
+                continue;
+            }
+            PilotPhaseStateMachine machine = stateMachines.remove( key );
+            PilotSession session = currentSessions.remove( key );
+            if( machine == null || session == null ) {
+                continue;
+            }
+            for( AirportEvent event : machine.onDisappearedFromFeed() ) {
+                pilotAirportEventRepository.save( PilotAirportEvent.builder()
+                    .pilotSession( session )
+                    .airportIcao( event.airportIcao() )
+                    .eventType( event.type() )
+                    .occurredAt( event.timestamp() )
+                    .build() );
+
+                if( event.type() == AirportEventType.LANDING ) {
+                    session.setStatus( SessionStatus.COMPLETED );
+                    session.setEndedAt( event.timestamp() );
+                    session = pilotSessionRepository.save( session );
+                }
+            }
+        }
+    }
+
+    /** Visible for testing: number of pilots currently held in the in-memory tracking maps. */
+    int trackedPilotCount() {
+        return stateMachines.size();
     }
 
     @PostConstruct
