@@ -4,6 +4,7 @@ import de.secretsoft.vatsim_stats.ingestion.domain.AtcSnapshot;
 import de.secretsoft.vatsim_stats.ingestion.domain.AtcSnapshotRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPoint;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPointRepository;
+import de.secretsoft.vatsim_stats.ingestion.session.PilotSessionOrchestrator;
 import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimController;
 import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimDataFeed;
 import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimDataFeedClient;
@@ -27,6 +28,7 @@ public class IngestionPoller {
     private final VatsimDataFeedClient feedClient;
     private final PilotTrackPointRepository trackPointRepository;
     private final AtcSnapshotRepository atcSnapshotRepository;
+    private final PilotSessionOrchestrator sessionOrchestrator;
 
     @Scheduled( fixedRateString = "${vatsim.poll-interval-ms:15000}" )
     public void poll() {
@@ -69,6 +71,10 @@ public class IngestionPoller {
         }
         if( !atcSnapshots.isEmpty() ) {
             atcSnapshotRepository.saveAll( atcSnapshots );
+        }
+
+        if( !trackPoints.isEmpty() ) {
+            sessionOrchestrator.processTrackPoints( trackPoints );
         }
 
         return new PollResult( trackPoints.size(), atcSnapshots.size(), skipped );

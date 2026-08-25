@@ -4,6 +4,7 @@ import de.secretsoft.vatsim_stats.ingestion.domain.AtcSnapshot;
 import de.secretsoft.vatsim_stats.ingestion.domain.AtcSnapshotRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPoint;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPointRepository;
+import de.secretsoft.vatsim_stats.ingestion.session.PilotSessionOrchestrator;
 import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimController;
 import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimDataFeed;
 import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimDataFeedClient;
@@ -27,6 +28,7 @@ class IngestionPollerTest {
     private VatsimDataFeedClient feedClient;
     private PilotTrackPointRepository trackPointRepository;
     private AtcSnapshotRepository atcSnapshotRepository;
+    private PilotSessionOrchestrator sessionOrchestrator;
     private IngestionPoller poller;
 
     @BeforeEach
@@ -34,7 +36,8 @@ class IngestionPollerTest {
         feedClient = mock( VatsimDataFeedClient.class );
         trackPointRepository = mock( PilotTrackPointRepository.class );
         atcSnapshotRepository = mock( AtcSnapshotRepository.class );
-        poller = new IngestionPoller( feedClient, trackPointRepository, atcSnapshotRepository );
+        sessionOrchestrator = mock( PilotSessionOrchestrator.class );
+        poller = new IngestionPoller( feedClient, trackPointRepository, atcSnapshotRepository, sessionOrchestrator );
     }
 
     @Test
@@ -65,6 +68,8 @@ class IngestionPollerTest {
         ArgumentCaptor<List<AtcSnapshot>> atcCaptor = ArgumentCaptor.forClass( List.class );
         verify( atcSnapshotRepository ).saveAll( atcCaptor.capture() );
         assertThat( atcCaptor.getValue().get( 0 ).getCallsign() ).isEqualTo( "EDDF_TWR" );
+
+        verify( sessionOrchestrator ).processTrackPoints( trackPointsCaptor.getValue() );
     }
 
     @Test
