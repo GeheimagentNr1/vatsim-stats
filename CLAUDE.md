@@ -73,6 +73,66 @@ im Rahmen des Projekts.
   nicht zu einer interaktiven Karten-/Replay-Anwendung mit Client-State.
   **Entscheidung: nicht verwendet.**
 
+## Implementierungsstand: Datenaufzeichnung (Ingestion & Phasenerkennung)
+
+Erstes Teilprojekt (vor der eigentlichen UI) ist umgesetzt: zuverlässige,
+dauerhafte Aufzeichnung von VATSIM-Piloten-/ATC-Sessions inkl. automatischer
+Erkennung von Start-/Lande-/Touch-and-Go-Ereignissen. Vollständiges Design:
+`docs/superpowers/specs/2026-08-24-data-ingestion-design.md`.
+
+### Projektstruktur (Maven-Multi-Modul, Java 21)
+
+- **`reference-data`** — täglicher Scheduled-Job (`OurAirportsScheduledImportJob`)
+  lädt `airports.csv`/`runways.csv` von ourairports.com und upsertet sie in
+  `airport`/`runway` (`OurAirportsImportService`, `OurAirportsCsvParser`).
+  `AirportRepository`/`RunwayRepository` (Spring Data JPA).
+- **`detection`** — reines Java, **keine Spring-Abhängigkeit**, unabhängig
+  testbar: `PilotPhaseStateMachine` (Zustandsmaschine `ON_GROUND` /
+  `AIRBORNE` / `GROUND_PENDING`, leitet `TAKEOFF`/`LANDING`/
+  `TOUCH_AND_GO`/`LOW_APPROACH`-Events aus einer Folge von `TrackSample`s
+  ab), `NearestAirportLookup` (Haversine-basierte Nächster-Nachbar-Suche,
+  ~5nm-Bounding-Box-Vorfilter), `PhaseDetectionConfig`.
+- **`ingestion`** — `IngestionPoller` (`@Scheduled`, alle 15s, ruft
+  `VatsimDataFeedClient` gegen `https://data.vatsim.net/v3/vatsim-data.json`
+  auf), `PilotSessionOrchestrator` (verdrahtet Rohdaten-Persistenz +
+  `PilotPhaseStateMachine` + Session-/Event-Ableitung), `AtcSessionTracker`
+  (einfachere Login/Logout-Session-Logik für ATC, kein Phasenmodell nötig).
+  JPA-Entities/Repositories unter `ingestion.domain`
+  (`PilotSession`, `PilotTrackPoint`, `PilotAirportEvent`, `AtcSession`,
+  `AtcSnapshot`).
+- **`monitoring`** — `HealthMonitor` merkt sich je Quelle (`vatsim-poll`,
+  `ourairports-import`) den letzten Erfolgszeitpunkt; `HealthAlertService`
+  prüft minütlich auf Überschreitung der Schwelle (5 Min. für den Poller)
+  und verschickt E-Mail-Alerts via Spring Mail; `IngestionHealthListener`
+  hört auf `PollCycleSucceededEvent`/`OurAirportsImportSucceededEvent`.
+- **`app`** — Spring-Boot-Entry-Point (`VatsimStatsApplication`), verdrahtet
+  alle Module, Flyway-Migrationen (`app/src/main/resources/db/migration`),
+  `application.yml`. Enthält zusätzlich eine **minimale interne
+  Verifikations-UI mit Vaadin** (`app.ui`: `MainLayout`,
+  `PilotSessionsView`, `AtcSessionsView`) — dient nur dem manuellen Prüfen
+  der aufgezeichneten Daten während der Entwicklung (Grids ohne Paging/
+  Filtern/Heatmaps), **kein** Vorgriff auf die spätere Vue-Produktiv-UI und
+  keine Rücknahme der Vaadin-Entscheidung oben; kann entfernt werden, sobald
+  die Vue-UI dieselbe Funktionalität abdeckt.
+
+### Datenbank & Migrationen
+
+- **Flyway** (`spring-boot-starter-flyway`, `flyway-database-postgresql`),
+  `spring.jpa.hibernate.ddl-auto: validate` — Schema wird ausschließlich
+  über Migrationsskripte verändert, nie über Hibernate.
+- Migrationen liegen in `app/src/main/resources/db/migration`:
+  - `V1__reference_data.sql` — `airport`, `runway` (normale Tabellen).
+  - `V2__ingestion.sql` — `pilot_track_point` und `atc_snapshot` als
+    **TimescaleDB-Hypertables** (`create_hypertable(..., by_range('recorded_at'))`,
+    Composite-PK `(id, recorded_at)`); `pilot_session`, `pilot_airport_event`,
+    `atc_session` als normale (nicht-hypertable) Tabellen für abgeleitete
+    Daten.
+- Natürlicher Session-Schlüssel: **CID + Callsign + `logon_time`**
+  (`SessionKey` in `ingestion.session`).
+- DB läuft lokal via `docker-compose.yml` (Image
+  `timescale/timescaledb:latest-pg16`), Zugangsdaten über `.env`
+  (`.env.example` ist committed, `.env` ist `.gitignore`t).
+
 ## Separates Lernprojekt: Custom JS/TS-Komponenten in Vaadin
 
 Unabhängig vom Hauptprojekt besteht Interesse, zu lernen, wie man
@@ -118,12 +178,33 @@ MVN="/c/Users/mbranz/AppData/Local/Programs/IntelliJ IDEA Ultimate/plugins/maven
 "$MVN" -q -pl app -am test -Dtest=ClassName   # einzelne Testklasse
 ```
 
+**Lokale Datenbank starten** (vor `spring-boot:run` bzw. Integrationstests
+mit Testcontainers/echter DB nötig; `.env` mit `POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `POSTGRES_DB` muss vorher aus `.env.example` angelegt
+sein):
+
+```bash
+docker compose up -d      # startet PostgreSQL+TimescaleDB (timescale/timescaledb:latest-pg16)
+```
+
+**App lokal starten** (verbindet sich gegen die per Compose gestartete DB,
+kein Container-Zwang für die App selbst; Vaadin-Verifikations-UI dann unter
+`http://localhost:8080`):
+
+```bash
+"$MVN" -q -pl app -am spring-boot:run
+```
+
 ## Offene Punkte
 
 - [ ] Ist das Replay-Feature tatsächlich im Scope? (Noch nicht final entschieden)
-- [ ] Datenquelle/Ingestion der VATSIM-Daten klären (VATSIM Data Feed /
-      Status API, Update-Intervall ca. alle 15 Sekunden laut offizieller API)
 - [ ] Datenvolumen abschätzen (Anzahl gleichzeitiger Sessions, Historie in
       Jahren) — relevant für TimescaleDB-Konfiguration und Tabellen-Paging
+      (Kompressions-/Retention-Policy noch offen)
 - [ ] Entscheidung: Nuxt (SSR) nötig für öffentliche Event-Statistikseiten,
       oder reicht ein reines Vite+Vue SPA?
+- [ ] UI/Frontend (Vue 3) ist noch nicht begonnen — Ingestion & Phasenerkennung
+      sind bewusst als eigenständiges erstes Teilprojekt ohne UI umgesetzt
+      (siehe Design-Doc).
+- [ ] Runway-genaue Zuordnung von Start-/Landeereignissen (aktuell nur
+      Airport-Ebene).
