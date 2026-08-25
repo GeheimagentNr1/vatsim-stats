@@ -101,8 +101,15 @@ Erkennung von Start-/Lande-/Touch-and-Go-Ereignissen. Vollständiges Design:
   (einfachere Login/Logout-Session-Logik für ATC, kein Phasenmodell nötig),
   `AirportRepositoryLookup` (`ingestion.session`, implementiert
   `detection`s `NearestAirportLookup`-Interface: ~5nm-Bounding-Box-SQL-
-  Vorfilter via `AirportRepository`, dann exakte Haversine-Rangfolge).
-  JPA-Entities/Repositories unter `ingestion.domain`
+  Vorfilter via `AirportRepository`, dann exakte Haversine-Rangfolge),
+  `PilotSessionTimeoutSweeper` (`@Scheduled`, alle 5 Min.: schließt
+  `ACTIVE`-Pilot-Sessions ohne Trackpunkt seit 30 Min. als `COMPLETED`,
+  ohne künstliches `LANDING`-Event — deckt Piloten ab, die mitten im Flug
+  disconnecten, ohne `GROUND_PENDING` zu erreichen). Sowohl
+  `PilotSessionOrchestrator` als auch `AtcSessionTracker` werten ein
+  Verschwinden aus dem Feed erst nach 4 aufeinanderfolgenden verpassten
+  Poll-Zyklen (~60s) als echtes Verschwinden (Debounce gegen einzelne
+  VATSIM-Feed-Aussetzer). JPA-Entities/Repositories unter `ingestion.domain`
   (`PilotSession`, `PilotTrackPoint`, `PilotAirportEvent`, `AtcSession`,
   `AtcSnapshot`).
 - **`monitoring`** — `HealthMonitor` merkt sich je Quelle (`vatsim-poll`,
