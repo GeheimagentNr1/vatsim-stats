@@ -11,12 +11,15 @@ import de.secretsoft.vatsim_stats.ingestion.domain.PilotAirportEventRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotSession;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotSessionRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPoint;
+import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPointRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.SessionStatus;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +32,7 @@ public class PilotSessionOrchestrator {
     private final PilotSessionRepository pilotSessionRepository;
     private final PilotAirportEventRepository pilotAirportEventRepository;
     private final NearestAirportLookup airportLookup;
+    private final PilotTrackPointRepository pilotTrackPointRepository;
 
     private final ConcurrentMap<SessionKey, PilotPhaseStateMachine> stateMachines = new ConcurrentHashMap<>();
     private final ConcurrentMap<SessionKey, PilotSession> currentSessions = new ConcurrentHashMap<>();
@@ -40,9 +44,27 @@ public class PilotSessionOrchestrator {
         }
     }
 
-    void seed( SessionKey key, PilotPhaseStateMachine machine, PilotSession session ) {
-        stateMachines.put( key, machine );
-        currentSessions.put( key, session );
+    @PostConstruct
+    void reconstructActiveSessions() {
+        for( PilotSession session : pilotSessionRepository.findByStatus( SessionStatus.ACTIVE ) ) {
+            SessionKey key = new SessionKey( session.getCid(), session.getCallsign(), session.getLogonTime() );
+            List<PilotTrackPoint> recentPointsNewestFirst = pilotTrackPointRepository
+                .findTop10ByCidAndCallsignAndLogonTimeOrderByRecordedAtDesc(
+                    session.getCid(), session.getCallsign(), session.getLogonTime() );
+
+            PilotPhaseStateMachine machine =
+                new PilotPhaseStateMachine( PhaseDetectionConfig.defaults(), airportLookup );
+            List<PilotTrackPoint> chronological = new java.util.ArrayList<>( recentPointsNewestFirst );
+            Collections.reverse( chronological );
+            for( PilotTrackPoint point : chronological ) {
+                machine.process( new TrackSample(
+                    point.getRecordedAt(), point.getLatitude(), point.getLongitude(),
+                    point.getAltitudeFt(), point.getGroundspeedKt() ) );
+            }
+
+            stateMachines.put( key, machine );
+            currentSessions.put( key, session );
+        }
     }
 
     private void handleTrackPoint( PilotTrackPoint point ) {

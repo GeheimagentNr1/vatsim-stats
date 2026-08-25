@@ -5,6 +5,7 @@ import de.secretsoft.vatsim_stats.detection.NearestAirportLookup;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotAirportEventRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotSession;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPoint;
+import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPointRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.SessionStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,7 +35,8 @@ class PilotSessionOrchestratorTest {
         eventRepository = mock( PilotAirportEventRepository.class );
         when( eventRepository.save( org.mockito.ArgumentMatchers.any() ) )
             .thenAnswer( invocation -> invocation.getArgument( 0 ) );
-        orchestrator = new PilotSessionOrchestrator( sessionRepository, eventRepository, lookup );
+        orchestrator = new PilotSessionOrchestrator(
+            sessionRepository, eventRepository, lookup, mock( PilotTrackPointRepository.class ) );
     }
 
     private PilotTrackPoint point( int offsetSeconds, double altitudeFt, double groundspeedKt,
