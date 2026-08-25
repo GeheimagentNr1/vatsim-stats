@@ -144,8 +144,40 @@ Erkennung von Start-/Lande-/Touch-and-Go-Ereignissen. Vollständiges Design:
 - Natürlicher Session-Schlüssel: **CID + Callsign + `logon_time`**
   (`SessionKey` in `ingestion.session`).
 - DB läuft lokal via `docker-compose.yml` (Image
-  `timescale/timescaledb:latest-pg16`), Zugangsdaten über `.env`
-  (`.env.example` ist committed, `.env` ist `.gitignore`t).
+  `timescale/timescaledb:latest-pg18`), Zugangsdaten über `.env`
+  (`.env.example` ist committed, `.env` ist `.gitignore`t). **Wichtig:**
+  ab PostgreSQL 18 muss das Volume auf `/var/lib/postgresql` gemountet
+  werden (nicht mehr `/var/lib/postgresql/data` wie bei pg16) — die
+  Images legen die Daten ab pg18 in einem major-version-spezifischen
+  Unterverzeichnis ab (`pg_ctlcluster`-Konvention); ein Mount auf dem
+  alten Pfad lässt den Container beim Start mit einem Fehler abbrechen.
+
+## Docker-Image & Release
+
+- `Dockerfile` (Projekt-Root): `FROM eclipse-temurin:21`, kopiert
+  `app/target/vatsim-stats-app.jar` (Ergebnis von `finalName=vatsim-stats`
+  + `spring-boot-maven-plugin`-Execution mit `classifier=app` in
+  `app/pom.xml`), startet per `java -jar`.
+- `app/pom.xml` hat ein `production`-Maven-Profil (`vaadin-maven-plugin`
+  `build-frontend` in der `compile`-Phase) für einen echten Vaadin-
+  Production-Build (kein Dev-Bundle, kein `vaadin-dev` im laufenden
+  Betrieb relevant) — Build dafür: `mvn clean package -Pproduction`.
+- `.github/workflows/build-and-release.yml`: `build`-Job (bei jedem
+  Push/PR) baut mit `-Pproduction`, läuft die Testsuite und startet
+  danach den gepackten Jar als Smoke-Test gegen einen
+  `timescale/timescaledb:latest-pg18`-Service-Container (gleiche
+  Zugangsdaten wie `docker-compose.yml`/`.env.example`); Scheduling ist
+  dabei über `-Dvatsim.scheduling.enabled=false` deaktiviert, damit der
+  Smoke-Test nicht sofort live gegen den echten VATSIM-Feed pollt oder
+  den OurAirports-Import auslöst. `release`-Job (nur bei
+  GitHub-Release-Publish) extrahiert die Version aus dem Release-Namen,
+  setzt sie per `versions:set`, verschiebt den Tag auf den Release-
+  Commit, baut und pusht das Image nach `ghcr.io/<repo>` (Tags:
+  `{version}`, `{major}.{minor}`, `{major}`, `latest`), und setzt danach
+  automatisch die nächste SNAPSHOT-Version. Struktur 1:1 übernommen vom
+  bereits produktiv genutzten Workflow in `vatsim-tools`, mit den beiden
+  Anpassungen oben (Postgres-Service-Container, `-Pproduction`) als
+  einzigen inhaltlichen Unterschieden.
 
 ## Separates Lernprojekt: Custom JS/TS-Komponenten in Vaadin
 
@@ -207,7 +239,7 @@ mit Testcontainers/echter DB nötig; `.env` mit `POSTGRES_USER`,
 sein):
 
 ```bash
-docker compose up -d      # startet PostgreSQL+TimescaleDB (timescale/timescaledb:latest-pg16)
+docker compose up -d      # startet PostgreSQL+TimescaleDB (timescale/timescaledb:latest-pg18)
 ```
 
 **App lokal starten** (verbindet sich gegen die per Compose gestartete DB,
