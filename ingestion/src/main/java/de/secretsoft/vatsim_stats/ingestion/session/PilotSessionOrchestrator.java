@@ -45,7 +45,8 @@ public class PilotSessionOrchestrator {
 
     private final ConcurrentMap<SessionKey, PilotPhaseStateMachine> stateMachines = new ConcurrentHashMap<>();
     private final ConcurrentMap<SessionKey, PilotSession> currentSessions = new ConcurrentHashMap<>();
-    private final ConcurrentMap<SessionKey, Integer> missedCycles = new ConcurrentHashMap<>();
+    private final DisappearanceDebounce<SessionKey> disappearanceDebounce =
+        new DisappearanceDebounce<>( DISAPPEARANCE_THRESHOLD_CYCLES );
 
     /**
      * Processes one complete poll cycle's worth of track points. Every pilot present in the feed for
@@ -75,14 +76,12 @@ public class PilotSessionOrchestrator {
     private void closeSessionsNotSeen( Set<SessionKey> seenThisCycle ) {
         for( SessionKey key : Set.copyOf( stateMachines.keySet() ) ) {
             if( seenThisCycle.contains( key ) ) {
-                missedCycles.remove( key );
+                disappearanceDebounce.seen( key );
                 continue;
             }
-            int misses = missedCycles.merge( key, 1, Integer::sum );
-            if( misses < DISAPPEARANCE_THRESHOLD_CYCLES ) {
+            if( !disappearanceDebounce.recordMissAndCheckThresholdReached( key ) ) {
                 continue;
             }
-            missedCycles.remove( key );
 
             PilotPhaseStateMachine machine = stateMachines.remove( key );
             PilotSession session = currentSessions.remove( key );
