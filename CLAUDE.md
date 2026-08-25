@@ -105,7 +105,9 @@ Erkennung von Start-/Lande-/Touch-and-Go-Ereignissen. Vollständiges Design:
   `PilotSessionTimeoutSweeper` (`@Scheduled`, alle 5 Min.: schließt
   `ACTIVE`-Pilot-Sessions ohne Trackpunkt seit 30 Min. als `COMPLETED`,
   ohne künstliches `LANDING`-Event — deckt Piloten ab, die mitten im Flug
-  disconnecten, ohne `GROUND_PENDING` zu erreichen). Sowohl
+  disconnecten, ohne `GROUND_PENDING` zu erreichen; bekanntes, bewusst
+  akzeptiertes Restrisiko bei einem VATSIM-Feed-Totalausfall ≥30 Min.,
+  siehe Design-Doc). Sowohl
   `PilotSessionOrchestrator` als auch `AtcSessionTracker` werten ein
   Verschwinden aus dem Feed erst nach 4 aufeinanderfolgenden verpassten
   Poll-Zyklen (~60s) als echtes Verschwinden (Debounce gegen einzelne

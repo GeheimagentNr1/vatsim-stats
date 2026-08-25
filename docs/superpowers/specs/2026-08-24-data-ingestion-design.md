@@ -157,6 +157,28 @@ Datenbasis für spätere Statistiken (Heatmaps, Session-Abfragen, Replay).
   rein auf Datenbankebene und greift nicht in die laufende Live-
   Verarbeitung ein — zum Zeitpunkt des 30-Minuten-Timeouts ist die
   Session längst nicht mehr im Speicher.
+- **Bekanntes Restrisiko, bewusst akzeptiert:** Fällt der VATSIM-Feed
+  selbst für ≥30 Minuten am Stück aus (nicht der einzelne Pilot, sondern
+  die gesamte Datenquelle), zählt der Zyklen-Zähler nicht mehr hoch (der
+  Poller bricht schon beim Feed-Abruf ab, bevor `processTrackPoints`
+  überhaupt läuft — Piloten bleiben also korrekt im Speicher). Der
+  Timeout-Job läuft aber unabhängig auf seinem eigenen 5-Minuten-Takt
+  weiter und würde nach 30 Minuten Ausfall alle noch aktiven Sessions
+  fälschlich auf `COMPLETED` setzen, obwohl die Piloten (aus Systemsicht)
+  weiterhin verbunden sind. Kommt der Feed danach zurück, überschreibt
+  der Orchestrator diesen Stand beim nächsten Trackpunkt/Statuswechsel
+  der jeweiligen Session i. d. R. automatisch wieder korrekt (der
+  In-Memory-Stand ist für Live-Entscheidungen maßgeblich, nicht die
+  DB-Zeile) — das Verhalten ist also größtenteils selbstheilend, nicht
+  dauerhaft zerstörend. Entscheidung: **keine zusätzliche Absicherung
+  eingebaut** (z. B. ein Health-Check-Gate vor dem Sweep) — ein VATSIM-
+  Ausfall dieser Länge, bei dem realistisch noch relevant viele Piloten
+  ununterbrochen verbunden blieben, wird als sehr unwahrscheinlich
+  eingeschätzt, und der Aufwand für eine Absicherung steht in keinem
+  Verhältnis zum Risiko. Sollte sich das als Fehleinschätzung erweisen,
+  ist die Absicherung (Gate über den bestehenden `HealthMonitor`-
+  Erfolgszeitstempel des Pollers) nachträglich ohne Architekturänderung
+  ergänzbar.
 
 ## Ingestion-Poller
 
