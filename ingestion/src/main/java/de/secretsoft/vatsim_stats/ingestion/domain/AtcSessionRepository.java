@@ -11,4 +11,6 @@ public interface AtcSessionRepository extends JpaRepository<AtcSession, Long> {
     Optional<AtcSession> findByCidAndCallsignAndLogonTime( Long cid, String callsign, Instant logonTime );
 
     List<AtcSession> findByEndedAtIsNull();
+
+    List<AtcSession> findTop200ByOrderByStartedAtDesc();
 }

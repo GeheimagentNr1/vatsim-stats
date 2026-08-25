@@ -41,6 +41,11 @@ class InMemoryPilotSessionRepository implements PilotSessionRepository {
     }
 
     @Override
+    public List<PilotSession> findTop200ByOrderByStartedAtDesc() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public <S extends PilotSession> S save( S entity ) {
         if( entity.getId() == null ) {
             entity.setId( sequence.incrementAndGet() );

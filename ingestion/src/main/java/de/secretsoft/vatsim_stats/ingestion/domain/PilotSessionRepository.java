@@ -15,4 +15,6 @@ public interface PilotSessionRepository extends JpaRepository<PilotSession, Long
         Long cid, String callsign, Instant logonTime );
 
     List<PilotSession> findByStatus( SessionStatus status );
+
+    List<PilotSession> findTop200ByOrderByStartedAtDesc();
 }

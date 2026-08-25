@@ -97,6 +97,11 @@ class AtcSessionTrackerTest {
         }
 
         @Override
+        public List<AtcSession> findTop200ByOrderByStartedAtDesc() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public <S extends AtcSession> S save( S entity ) {
             if( entity.getId() == null ) {
                 entity.setId( sequence.incrementAndGet() );
