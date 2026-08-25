@@ -111,6 +111,53 @@ Datenbasis für spätere Statistiken (Heatmaps, Session-Abfragen, Replay).
   verschwindet (Logout-Zeitpunkt = letzter gesehener Poll). Frequenzwechsel
   auf derselben `logon_time` aktualisiert nur die laufende Session.
 
+### Verschwinden-Erkennung mit Pufferzeit (Debounce)
+
+- "Verschwindet aus dem Feed" (sowohl für den `GROUND_PENDING`→`LANDING`-
+  Trigger als auch für das ATC-Session-Ende) wird **nicht** nach einem
+  einzigen fehlenden Poll-Zyklus ausgelöst, sondern erst nach **4
+  aufeinanderfolgenden verpassten Zyklen** (~60 Sekunden bei 15s-
+  Poll-Intervall). Grund: ein einzelner VATSIM-Feed-Aussetzer darf nicht
+  fälschlich eine Landung/einen Session-Abschluss erzeugen — 4 Zyklen
+  geben einem Piloten/Controller realistisch Zeit, eine kurze
+  Verbindungsstörung selbst zu beheben (Reconnect), bevor das System es
+  als echtes Verschwinden wertet.
+- Pro verfolgtem Schlüssel (Pilot: `SessionKey`; ATC: analog) wird ein
+  Zähler für aufeinanderfolgend verpasste Zyklen geführt. Erscheint der
+  Schlüssel wieder im Feed, wird der Zähler zurückgesetzt. Erst beim
+  Erreichen von 4 wird die bisherige "verschwunden"-Behandlung ausgelöst
+  (bei `GROUND_PENDING` → `LANDING`; bei `AIRBORNE` → nur Räumung aus dem
+  Arbeitsspeicher, siehe unten; bei ATC → Session-Ende, Zeitstempel =
+  letzter tatsächlich gesehener Snapshot, nicht der 4. Fehlversuch).
+
+### AIRBORNE-Timeout (Session-Bereinigung ohne erkannte Landung)
+
+- Verschwindet ein Pilot **während `AIRBORNE`** dauerhaft aus dem Feed
+  (z. B. Verbindungsabbruch mitten im Flug, Client-Crash, Absturz aus dem
+  VATSIM-Funkbereich), entsteht kein `LANDING`-Event — die Spec definiert
+  hierfür bewusst kein synthetisches Event, da sonst eine Landung an
+  einem Flughafen vorgetäuscht würde, die real nie stattfand. Ohne
+  weitere Maßnahme bliebe die zugehörige `pilot_session` für immer auf
+  Status `ACTIVE` stehen.
+- Ein separater, periodischer Job (alle 5 Minuten, analog zum
+  `HealthAlertService`-Muster) sucht `ACTIVE`-Pilot-Sessions, deren
+  letzter bekannter Trackpunkt (`pilot_track_point`) älter als **30
+  Minuten** ist, und schließt sie: Status → `COMPLETED`, `endedAt` =
+  Zeitstempel des letzten bekannten Trackpunkts (nicht der Zeitpunkt des
+  Jobs). **Kein** künstliches `LANDING`-Event wird erzeugt.
+- Bewusste Entscheidung: kein eigener Status (z. B. `TIMED_OUT`) für
+  diesen Fall — `COMPLETED` wird wiederverwendet. Die Unterscheidung
+  "echte Landung erkannt" vs. "Verbindung verloren, keine Landung
+  bekannt" bleibt für Auswertungen über die Existenz eines `LANDING`-
+  Events in `pilot_airport_event` zur jeweiligen Session verfügbar — das
+  ist bereits die primäre Quelle der Wahrheit für Bewegungsstatistik
+  (siehe oben), nicht `pilot_session.status`.
+- Da ein Pilot durch die 4-Zyklen-Pufferzeit (s. o.) ohnehin schon nach
+  ~60 Sekunden aus dem Arbeitsspeicher geräumt wird, operiert dieser Job
+  rein auf Datenbankebene und greift nicht in die laufende Live-
+  Verarbeitung ein — zum Zeitpunkt des 30-Minuten-Timeouts ist die
+  Session längst nicht mehr im Speicher.
+
 ## Ingestion-Poller
 
 - `@Scheduled`-Task, alle 15 Sekunden: ruft
