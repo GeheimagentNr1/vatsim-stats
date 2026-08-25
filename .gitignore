@@ -10,3 +10,7 @@ target/
 
 node_modules/
 dist/
+
+# Vaadin dev-mode generated frontend artifacts
+**/src/main/frontend/generated/
+**/src/main/frontend/index.html
