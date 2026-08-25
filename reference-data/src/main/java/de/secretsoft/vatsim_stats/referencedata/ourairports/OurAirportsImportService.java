@@ -13,7 +13,11 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +25,7 @@ public class OurAirportsImportService {
 
     private static final String AIRPORTS_CSV_URL = "https://davidmegginson.github.io/ourairports-data/airports.csv";
     private static final String RUNWAYS_CSV_URL = "https://davidmegginson.github.io/ourairports-data/runways.csv";
+    private static final int DELETE_BATCH_SIZE = 500;
 
     private final OurAirportsCsvParser parser;
     private final AirportRepository airportRepository;
@@ -53,7 +58,23 @@ public class OurAirportsImportService {
             airportRepository.save( airport );
         }
 
-        List<RunwayCsvRecord> runways = parser.parseRunways( runwaysCsv );
+        // Only runways whose airport actually survived the airport-type filter may be imported:
+        // runways.csv also contains heliports, seaplane bases and similar, whose ICAO code will
+        // never exist in the airport table and would violate runway.airport_icao's foreign key.
+        Set<String> importedIcaos = airports.stream()
+            .map( AirportCsvRecord::icao )
+            .collect( Collectors.toSet() );
+        List<RunwayCsvRecord> runways = parser.parseRunways( runwaysCsv ).stream()
+            .filter( record -> importedIcaos.contains( record.airportIcao() ) )
+            .toList();
+
+        // Runways have no natural key beyond their surrogate id, so re-running the import would
+        // otherwise append the whole dataset again. Replace per airport: drop the existing rows of
+        // every airport we are about to (re-)import, then insert the freshly parsed set.
+        deleteExistingRunways( runways.stream()
+            .map( RunwayCsvRecord::airportIcao )
+            .collect( Collectors.toCollection( LinkedHashSet::new ) ) );
+
         for( RunwayCsvRecord record : runways ) {
             Runway runway = Runway.builder()
                 .airportIcao( record.airportIcao() )
@@ -70,6 +91,14 @@ public class OurAirportsImportService {
         }
 
         return new OurAirportsImportResult( airports.size(), runways.size() );
+    }
+
+    /** Deletes in chunks so the generated {@code IN (..)} clause stays within database limits. */
+    private void deleteExistingRunways( Collection<String> airportIcaos ) {
+        List<String> all = List.copyOf( airportIcaos );
+        for( int start = 0; start < all.size(); start += DELETE_BATCH_SIZE ) {
+            runwayRepository.deleteByAirportIcaoIn( all.subList( start, Math.min( start + DELETE_BATCH_SIZE, all.size() ) ) );
+        }
     }
 
     private java.io.InputStream download( RestClient client, String url ) {
