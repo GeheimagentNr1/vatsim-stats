@@ -23,6 +23,7 @@ spring:
           auth: true
           starttls:
             enable: true
+            required: true
 
 vatsim:
   poll-interval-ms: 15000
