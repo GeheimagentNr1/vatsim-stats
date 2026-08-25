@@ -56,13 +56,49 @@ class AtcSessionTrackerTest {
     }
 
     @Test
-    void closesTheSessionWithTheLastSeenTimestampWhenTheControllerDisappears() {
+    void doesNotCloseTheSessionWithinTheDebounceWindow() {
         tracker.processSnapshots( List.of( snapshot( 0 ) ) );
         tracker.processSnapshots( List.of( snapshot( 15 ) ) );
+
+        // 3 consecutive misses stay within the debounce window (threshold is 4).
+        tracker.processSnapshots( List.of() );
+        tracker.processSnapshots( List.of() );
+        tracker.processSnapshots( List.of() );
+
+        assertThat( repository.all().get( 0 ).getEndedAt() ).isNull();
+    }
+
+    @Test
+    void closesTheSessionWithTheLastSeenTimestampAfterFourConsecutiveMissedCycles() {
+        tracker.processSnapshots( List.of( snapshot( 0 ) ) );
+        tracker.processSnapshots( List.of( snapshot( 15 ) ) );
+        tracker.processSnapshots( List.of() );
+        tracker.processSnapshots( List.of() );
+        tracker.processSnapshots( List.of() );
         tracker.processSnapshots( List.of() );
 
         AtcSession session = repository.all().get( 0 );
         assertThat( session.getEndedAt() ).isEqualTo( LOGON.plusSeconds( 15 ) );
+    }
+
+    @Test
+    void reappearingBeforeTheDebounceThresholdResetsTheMissedCycleCounter() {
+        tracker.processSnapshots( List.of( snapshot( 0 ) ) );
+        tracker.processSnapshots( List.of() );
+        tracker.processSnapshots( List.of() );
+        tracker.processSnapshots( List.of() );
+        tracker.processSnapshots( List.of( snapshot( 45 ) ) );
+
+        assertThat( repository.all().get( 0 ).getEndedAt() ).isNull();
+
+        // 3 fresh misses must not build on the earlier ones.
+        tracker.processSnapshots( List.of() );
+        tracker.processSnapshots( List.of() );
+        tracker.processSnapshots( List.of() );
+        assertThat( repository.all().get( 0 ).getEndedAt() ).isNull();
+
+        tracker.processSnapshots( List.of() );
+        assertThat( repository.all().get( 0 ).getEndedAt() ).isEqualTo( LOGON.plusSeconds( 45 ) );
     }
 
     @Test
@@ -76,7 +112,9 @@ class AtcSessionTrackerTest {
 
         AtcSessionTracker restarted = new AtcSessionTracker( repository, snapshots );
         restarted.reconstructOpenSessions();
-        restarted.processSnapshots( List.of() );
+        for( int i = 0; i < 4; i++ ) {
+            restarted.processSnapshots( List.of() );
+        }
 
         AtcSession session = repository.all().get( 0 );
         assertThat( session.getEndedAt() ).isEqualTo( LOGON.plusSeconds( 3600 ) );
@@ -90,27 +128,33 @@ class AtcSessionTrackerTest {
 
         AtcSessionTracker restarted = new AtcSessionTracker( repository, mock( AtcSnapshotRepository.class ) );
         restarted.reconstructOpenSessions();
-        restarted.processSnapshots( List.of() );
+        for( int i = 0; i < 4; i++ ) {
+            restarted.processSnapshots( List.of() );
+        }
 
         AtcSession session = repository.all().get( 0 );
         assertThat( session.getEndedAt() ).isEqualTo( LOGON );
     }
 
     @Test
-    void reopensTheExistingSessionWhenTheSameControllerReappearsAfterAMissedCycle() {
+    void reopensTheExistingSessionWhenTheSameControllerReappearsAfterMissedCycles() {
         tracker.processSnapshots( List.of( snapshot( 0 ) ) );
-        tracker.processSnapshots( List.of() );
+        for( int i = 0; i < 4; i++ ) {
+            tracker.processSnapshots( List.of() );
+        }
         assertThat( repository.all().get( 0 ).getEndedAt() ).isEqualTo( LOGON );
 
-        tracker.processSnapshots( List.of( snapshot( 30 ) ) );
+        tracker.processSnapshots( List.of( snapshot( 60 ) ) );
 
         assertThat( repository.all() ).hasSize( 1 );
         assertThat( repository.all().get( 0 ).getEndedAt() ).isNull();
         assertThat( repository.all().get( 0 ).getStartedAt() ).isEqualTo( LOGON );
 
-        tracker.processSnapshots( List.of() );
+        for( int i = 0; i < 4; i++ ) {
+            tracker.processSnapshots( List.of() );
+        }
         assertThat( repository.all() ).hasSize( 1 );
-        assertThat( repository.all().get( 0 ).getEndedAt() ).isEqualTo( LOGON.plusSeconds( 30 ) );
+        assertThat( repository.all().get( 0 ).getEndedAt() ).isEqualTo( LOGON.plusSeconds( 60 ) );
     }
 
     private static class FakeAtcSessionRepository implements AtcSessionRepository {

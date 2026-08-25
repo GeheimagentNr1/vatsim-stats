@@ -118,7 +118,7 @@ class PilotSessionOrchestratorTest {
     }
 
     @Test
-    void disappearingFromTheFeedWhileGroundPendingCompletesTheSessionWithALanding() {
+    void disappearingFromTheFeedWhileGroundPendingCompletesTheSessionWithALandingAfterFourMissedCycles() {
         orchestrator.processTrackPoints( List.of( point( 0, 3000, 250, "EDDF", "EDDM" ) ) );
         // One ground point puts the state machine into GROUND_PENDING (dwell threshold not reached).
         orchestrator.processTrackPoints( List.of( point( 15, 550, 15, "EDDF", "EDDM" ) ) );
@@ -129,7 +129,18 @@ class PilotSessionOrchestratorTest {
         assertThat( pending.getStatus() ).isEqualTo( SessionStatus.ACTIVE );
         assertThat( orchestrator.trackedPilotCount() ).isEqualTo( 1 );
 
-        // The pilot is absent from the next cycle's batch -> disconnect.
+        // The pilot is absent from the next 3 cycles' batches -> still within the debounce window,
+        // nothing happens yet (guards against a single transient VATSIM feed gap).
+        orchestrator.processTrackPoints( List.of() );
+        orchestrator.processTrackPoints( List.of() );
+        orchestrator.processTrackPoints( List.of() );
+        verify( eventRepository, org.mockito.Mockito.never() ).save( org.mockito.ArgumentMatchers.any() );
+        assertThat( orchestrator.trackedPilotCount() ).isEqualTo( 1 );
+        assertThat( sessionRepository
+            .findFirstByCidAndCallsignAndLogonTimeOrderBySequenceNumberDesc( 123456L, "DLH400", LOGON )
+            .orElseThrow().getStatus() ).isEqualTo( SessionStatus.ACTIVE );
+
+        // The 4th consecutive missed cycle crosses the debounce threshold -> disconnect.
         orchestrator.processTrackPoints( List.of() );
 
         ArgumentCaptor<PilotAirportEvent> eventCaptor = ArgumentCaptor.forClass( PilotAirportEvent.class );
@@ -147,10 +158,37 @@ class PilotSessionOrchestratorTest {
     }
 
     @Test
+    void reappearingBeforeTheDebounceThresholdResetsTheMissedCycleCounter() {
+        orchestrator.processTrackPoints( List.of( point( 0, 3000, 250, "EDDF", "EDDM" ) ) );
+        orchestrator.processTrackPoints( List.of( point( 15, 550, 15, "EDDF", "EDDM" ) ) );
+
+        // Miss 3 cycles (below the threshold of 4), then reappear.
+        orchestrator.processTrackPoints( List.of() );
+        orchestrator.processTrackPoints( List.of() );
+        orchestrator.processTrackPoints( List.of() );
+        orchestrator.processTrackPoints( List.of( point( 75, 550, 15, "EDDF", "EDDM" ) ) );
+
+        assertThat( orchestrator.trackedPilotCount() ).isEqualTo( 1 );
+        verify( eventRepository, org.mockito.Mockito.never() ).save( org.mockito.ArgumentMatchers.any() );
+
+        // Now miss 4 fresh consecutive cycles; the earlier misses must not carry over into this count.
+        orchestrator.processTrackPoints( List.of() );
+        orchestrator.processTrackPoints( List.of() );
+        orchestrator.processTrackPoints( List.of() );
+        verify( eventRepository, org.mockito.Mockito.never() ).save( org.mockito.ArgumentMatchers.any() );
+        orchestrator.processTrackPoints( List.of() );
+
+        verify( eventRepository, times( 1 ) ).save( org.mockito.ArgumentMatchers.any() );
+        assertThat( orchestrator.trackedPilotCount() ).isZero();
+    }
+
+    @Test
     void aPilotReappearingAfterEvictionStartsFromAFreshStateMachine() {
         orchestrator.processTrackPoints( List.of( point( 0, 3000, 250, "EDDF", "EDDM" ) ) );
         orchestrator.processTrackPoints( List.of( point( 15, 550, 15, "EDDF", "EDDM" ) ) );
-        orchestrator.processTrackPoints( List.of() );
+        for( int i = 0; i < 4; i++ ) {
+            orchestrator.processTrackPoints( List.of() );
+        }
         assertThat( orchestrator.trackedPilotCount() ).isZero();
 
         // If stale GROUND_PENDING state had survived, this single ground point would immediately
@@ -162,7 +200,7 @@ class PilotSessionOrchestratorTest {
     }
 
     @Test
-    void otherPilotsInTheSameCycleAreNotClosed() {
+    void otherPilotsAreNotClosedByASingleMissedCycleAndAreEventuallyClosedAfterFour() {
         PilotTrackPoint other = PilotTrackPoint.builder()
             .recordedAt( LOGON ).cid( 999L ).callsign( "BAW1" ).logonTime( LOGON )
             .latitude( 50.0 ).longitude( 8.5 ).altitudeFt( 3000 ).groundspeedKt( 250 ).build();
@@ -170,7 +208,17 @@ class PilotSessionOrchestratorTest {
         orchestrator.processTrackPoints( List.of( point( 0, 3000, 250, "EDDF", "EDDM" ), other ) );
         assertThat( orchestrator.trackedPilotCount() ).isEqualTo( 2 );
 
+        // BAW1 is absent from this cycle's batch, but a single miss must not close it yet.
         orchestrator.processTrackPoints( List.of( point( 15, 3000, 250, "EDDF", "EDDM" ) ) );
+        assertThat( orchestrator.trackedPilotCount() ).isEqualTo( 2 );
+        assertThat( sessionRepository
+            .findFirstByCidAndCallsignAndLogonTimeOrderBySequenceNumberDesc( 123456L, "DLH400", LOGON )
+            .orElseThrow().getStatus() ).isEqualTo( SessionStatus.ACTIVE );
+
+        // 3 more consecutive misses for BAW1 cross the threshold; DLH400 stays tracked throughout.
+        for( int offset = 30; offset <= 60; offset += 15 ) {
+            orchestrator.processTrackPoints( List.of( point( offset, 3000, 250, "EDDF", "EDDM" ) ) );
+        }
 
         assertThat( orchestrator.trackedPilotCount() ).isEqualTo( 1 );
         assertThat( sessionRepository

@@ -23,8 +23,16 @@ public class AtcSessionTracker {
     private final AtcSessionRepository atcSessionRepository;
     private final AtcSnapshotRepository atcSnapshotRepository;
 
+    /**
+     * Number of consecutive poll cycles a tracked controller may be absent from the feed before being
+     * treated as genuinely logged off. Guards against a single transient VATSIM feed gap producing a
+     * false session close; see the spec's "Verschwinden-Erkennung mit Pufferzeit" section.
+     */
+    private static final int DISAPPEARANCE_THRESHOLD_CYCLES = 4;
+
     private final ConcurrentMap<SessionKey, AtcSession> openSessions = new ConcurrentHashMap<>();
     private final ConcurrentMap<SessionKey, Instant> lastSeenAt = new ConcurrentHashMap<>();
+    private final ConcurrentMap<SessionKey, Integer> missedCycles = new ConcurrentHashMap<>();
 
     @PostConstruct
     void reconstructOpenSessions() {
@@ -83,12 +91,20 @@ public class AtcSessionTracker {
 
     private void closeSessionsNotSeen( Set<SessionKey> seenThisCycle ) {
         for( SessionKey key : Set.copyOf( openSessions.keySet() ) ) {
-            if( !seenThisCycle.contains( key ) ) {
-                AtcSession session = openSessions.get( key );
-                session.setEndedAt( lastSeenAt.get( key ) );
-                atcSessionRepository.save( session );
-                openSessions.remove( key );
+            if( seenThisCycle.contains( key ) ) {
+                missedCycles.remove( key );
+                continue;
             }
+            int misses = missedCycles.merge( key, 1, Integer::sum );
+            if( misses < DISAPPEARANCE_THRESHOLD_CYCLES ) {
+                continue;
+            }
+            missedCycles.remove( key );
+
+            AtcSession session = openSessions.get( key );
+            session.setEndedAt( lastSeenAt.get( key ) );
+            atcSessionRepository.save( session );
+            openSessions.remove( key );
         }
     }
 }

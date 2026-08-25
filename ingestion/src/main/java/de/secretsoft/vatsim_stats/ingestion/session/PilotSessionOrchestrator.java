@@ -36,13 +36,22 @@ public class PilotSessionOrchestrator {
     private final NearestAirportLookup airportLookup;
     private final PilotTrackPointRepository pilotTrackPointRepository;
 
+    /**
+     * Number of consecutive poll cycles a tracked pilot may be absent from the feed before being
+     * treated as genuinely disconnected. Guards against a single transient VATSIM feed gap producing
+     * a false LANDING/session closure; see the spec's "Verschwinden-Erkennung mit Pufferzeit" section.
+     */
+    private static final int DISAPPEARANCE_THRESHOLD_CYCLES = 4;
+
     private final ConcurrentMap<SessionKey, PilotPhaseStateMachine> stateMachines = new ConcurrentHashMap<>();
     private final ConcurrentMap<SessionKey, PilotSession> currentSessions = new ConcurrentHashMap<>();
+    private final ConcurrentMap<SessionKey, Integer> missedCycles = new ConcurrentHashMap<>();
 
     /**
      * Processes one complete poll cycle's worth of track points. Every pilot present in the feed for
      * this cycle must be contained in {@code trackPoints} — pilots tracked in memory but missing from
-     * this list are treated as disconnected from the feed and are closed and evicted.
+     * this list are treated as disconnected from the feed only after
+     * {@value #DISAPPEARANCE_THRESHOLD_CYCLES} consecutive missed cycles, then closed and evicted.
      */
     @Transactional
     public void processTrackPoints( List<PilotTrackPoint> trackPoints ) {
@@ -55,17 +64,26 @@ public class PilotSessionOrchestrator {
     }
 
     /**
-     * Closes and evicts every tracked pilot that was not present in the current poll cycle. A pilot
-     * that vanishes while {@code GROUND_PENDING} yields a {@code LANDING} event (see the phase
-     * detection spec); the state machine and session are then dropped from memory so the maps do not
-     * grow without bound. A later reappearance of the same key correctly starts from a fresh state
-     * machine and re-loads/creates the session via {@link #loadOrCreateSession}.
+     * Closes and evicts every tracked pilot that has been absent from the feed for
+     * {@value #DISAPPEARANCE_THRESHOLD_CYCLES} consecutive poll cycles. A pilot that vanishes while
+     * {@code GROUND_PENDING} yields a {@code LANDING} event (see the phase detection spec); the state
+     * machine and session are then dropped from memory so the maps do not grow without bound. A later
+     * reappearance of the same key correctly starts from a fresh state machine and re-loads/creates
+     * the session via {@link #loadOrCreateSession}. A pilot missing for fewer than the threshold is
+     * left in place and their miss counter keeps accumulating; reappearing resets it to zero.
      */
     private void closeSessionsNotSeen( Set<SessionKey> seenThisCycle ) {
         for( SessionKey key : Set.copyOf( stateMachines.keySet() ) ) {
             if( seenThisCycle.contains( key ) ) {
+                missedCycles.remove( key );
                 continue;
             }
+            int misses = missedCycles.merge( key, 1, Integer::sum );
+            if( misses < DISAPPEARANCE_THRESHOLD_CYCLES ) {
+                continue;
+            }
+            missedCycles.remove( key );
+
             PilotPhaseStateMachine machine = stateMachines.remove( key );
             PilotSession session = currentSessions.remove( key );
             if( machine == null || session == null ) {
