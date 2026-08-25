@@ -24,6 +24,14 @@ spring:
           starttls:
             enable: true
             required: true
+  task:
+    scheduling:
+      pool:
+        # Pinned to 1 deliberately: IngestionPoller.poll(), HealthAlertService.checkHealth(),
+        # OurAirportsScheduledImportJob.run(), and PilotSessionTimeoutSweeper.closeTimedOutSessions()
+        # all rely on running serially, never concurrently with each other -- see
+        # PilotSessionTimeoutSweeper's class Javadoc for why this matters for its correctness.
+        size: 1
 
 vatsim:
   poll-interval-ms: 15000
