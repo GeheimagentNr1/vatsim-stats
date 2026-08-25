@@ -4,6 +4,7 @@ import de.secretsoft.vatsim_stats.ingestion.domain.AtcSnapshot;
 import de.secretsoft.vatsim_stats.ingestion.domain.AtcSnapshotRepository;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPoint;
 import de.secretsoft.vatsim_stats.ingestion.domain.PilotTrackPointRepository;
+import de.secretsoft.vatsim_stats.ingestion.session.AtcSessionTracker;
 import de.secretsoft.vatsim_stats.ingestion.session.PilotSessionOrchestrator;
 import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimController;
 import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimDataFeed;
@@ -29,6 +30,7 @@ class IngestionPollerTest {
     private PilotTrackPointRepository trackPointRepository;
     private AtcSnapshotRepository atcSnapshotRepository;
     private PilotSessionOrchestrator sessionOrchestrator;
+    private AtcSessionTracker atcSessionTracker;
     private IngestionPoller poller;
 
     @BeforeEach
@@ -37,7 +39,8 @@ class IngestionPollerTest {
         trackPointRepository = mock( PilotTrackPointRepository.class );
         atcSnapshotRepository = mock( AtcSnapshotRepository.class );
         sessionOrchestrator = mock( PilotSessionOrchestrator.class );
-        poller = new IngestionPoller( feedClient, trackPointRepository, atcSnapshotRepository, sessionOrchestrator );
+        atcSessionTracker = mock( AtcSessionTracker.class );
+        poller = new IngestionPoller( feedClient, trackPointRepository, atcSnapshotRepository, sessionOrchestrator, atcSessionTracker );
     }
 
     @Test
@@ -70,6 +73,7 @@ class IngestionPollerTest {
         assertThat( atcCaptor.getValue().get( 0 ).getCallsign() ).isEqualTo( "EDDF_TWR" );
 
         verify( sessionOrchestrator ).processTrackPoints( trackPointsCaptor.getValue() );
+        verify( atcSessionTracker ).processSnapshots( atcCaptor.getValue() );
     }
 
     @Test
