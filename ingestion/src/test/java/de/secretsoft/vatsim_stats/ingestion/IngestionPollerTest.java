@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 
@@ -43,7 +44,7 @@ class IngestionPollerTest {
         sessionOrchestrator = mock( PilotSessionOrchestrator.class );
         atcSessionTracker = mock( AtcSessionTracker.class );
         eventPublisher = mock( ApplicationEventPublisher.class );
-        poller = new IngestionPoller( feedClient, trackPointRepository, atcSnapshotRepository, sessionOrchestrator, atcSessionTracker, eventPublisher );
+        poller = new IngestionPoller( feedClient, trackPointRepository, atcSnapshotRepository, sessionOrchestrator, atcSessionTracker, eventPublisher, Clock.systemUTC() );
     }
 
     @Test

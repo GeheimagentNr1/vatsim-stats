@@ -18,6 +18,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +34,7 @@ public class IngestionPoller {
     private final PilotSessionOrchestrator sessionOrchestrator;
     private final AtcSessionTracker atcSessionTracker;
     private final ApplicationEventPublisher eventPublisher;
+    private final Clock clock;
 
     @Scheduled( fixedRateString = "${vatsim.poll-interval-ms:15000}" )
     public void poll() {
@@ -49,7 +51,7 @@ public class IngestionPoller {
             return PollResult.EMPTY;
         }
 
-        Instant recordedAt = Instant.now();
+        Instant recordedAt = clock.instant();
         int skipped = 0;
 
         List<PilotTrackPoint> trackPoints = new ArrayList<>();
