@@ -238,6 +238,12 @@ mit Testcontainers/echter DB nötig; `.env` mit `POSTGRES_USER`,
 `POSTGRES_PASSWORD`, `POSTGRES_DB` muss vorher aus `.env.example` angelegt
 sein):
 
+`spring.datasource.url` liest zusätzlich `POSTGRES_HOST` (Default:
+`localhost`) — für lokale Entwicklung/Tests bleibt das unverändert, wird
+aber gebraucht, sobald App und DB in getrennten Containern laufen (z. B.
+zwei Portainer-Stacks in Produktion), damit die App den DB-Container über
+dessen Service-/Container-Namen statt `localhost` erreicht.
+
 ```bash
 docker compose up -d      # startet PostgreSQL+TimescaleDB (timescale/timescaledb:latest-pg18)
 ```

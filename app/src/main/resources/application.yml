@@ -2,7 +2,7 @@ spring:
   application:
     name: vatsim-stats
   datasource:
-    url: jdbc:postgresql://localhost:${POSTGRES_PORT:5432}/${POSTGRES_DB:vatsim_stats}
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:vatsim_stats}
     username: ${POSTGRES_USER:vatsim_stats}
     password: ${POSTGRES_PASSWORD:changeme}
   jpa:
