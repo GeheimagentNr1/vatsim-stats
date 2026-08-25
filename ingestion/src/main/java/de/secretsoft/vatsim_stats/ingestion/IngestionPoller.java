@@ -13,6 +13,7 @@ import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimFlightPlan;
 import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimPilot;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ public class IngestionPoller {
     private final AtcSnapshotRepository atcSnapshotRepository;
     private final PilotSessionOrchestrator sessionOrchestrator;
     private final AtcSessionTracker atcSessionTracker;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Scheduled( fixedRateString = "${vatsim.poll-interval-ms:15000}" )
     public void poll() {
@@ -80,6 +82,7 @@ public class IngestionPoller {
         }
         atcSessionTracker.processSnapshots( atcSnapshots );
 
+        eventPublisher.publishEvent( new PollCycleSucceededEvent( recordedAt ) );
         return new PollResult( trackPoints.size(), atcSnapshots.size(), skipped );
     }
 

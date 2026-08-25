@@ -15,6 +15,7 @@ import de.secretsoft.vatsim_stats.ingestion.vatsimapi.VatsimPilot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Instant;
 import java.util.List;
@@ -31,6 +32,7 @@ class IngestionPollerTest {
     private AtcSnapshotRepository atcSnapshotRepository;
     private PilotSessionOrchestrator sessionOrchestrator;
     private AtcSessionTracker atcSessionTracker;
+    private ApplicationEventPublisher eventPublisher;
     private IngestionPoller poller;
 
     @BeforeEach
@@ -40,7 +42,8 @@ class IngestionPollerTest {
         atcSnapshotRepository = mock( AtcSnapshotRepository.class );
         sessionOrchestrator = mock( PilotSessionOrchestrator.class );
         atcSessionTracker = mock( AtcSessionTracker.class );
-        poller = new IngestionPoller( feedClient, trackPointRepository, atcSnapshotRepository, sessionOrchestrator, atcSessionTracker );
+        eventPublisher = mock( ApplicationEventPublisher.class );
+        poller = new IngestionPoller( feedClient, trackPointRepository, atcSnapshotRepository, sessionOrchestrator, atcSessionTracker, eventPublisher );
     }
 
     @Test
@@ -74,6 +77,7 @@ class IngestionPollerTest {
 
         verify( sessionOrchestrator ).processTrackPoints( trackPointsCaptor.getValue() );
         verify( atcSessionTracker ).processSnapshots( atcCaptor.getValue() );
+        verify( eventPublisher ).publishEvent( org.mockito.ArgumentMatchers.any( PollCycleSucceededEvent.class ) );
     }
 
     @Test
@@ -99,5 +103,6 @@ class IngestionPollerTest {
         assertThat( result.trackPointsSaved() ).isZero();
         assertThat( result.atcSnapshotsSaved() ).isZero();
         assertThat( result.recordsSkipped() ).isZero();
+        verify( eventPublisher, org.mockito.Mockito.never() ).publishEvent( org.mockito.ArgumentMatchers.any() );
     }
 }
