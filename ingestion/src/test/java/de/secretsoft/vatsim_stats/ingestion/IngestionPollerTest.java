@@ -96,6 +96,54 @@ class IngestionPollerTest {
     }
 
     @Test
+    void skipsPilotsWithoutALogonTimeOrWithoutAUsablePosition() {
+        VatsimPilot valid = new VatsimPilot(
+            1L, "DLH400", 50.0, 8.5, 3000, 180, 270, "2000", 1013, Instant.now(), null );
+        VatsimPilot noLogonTime = new VatsimPilot(
+            2L, "DLH401", 50.0, 8.5, 3000, 180, 270, "2000", 1013, null, null );
+        VatsimPilot noPosition = new VatsimPilot(
+            3L, "DLH402", 0.0, 0.0, 3000, 180, 270, "2000", 1013, Instant.now(), null );
+        when( feedClient.fetchCurrent() )
+            .thenReturn( new VatsimDataFeed( List.of( valid, noLogonTime, noPosition ), List.of() ) );
+
+        PollResult result = poller.pollOnce();
+
+        assertThat( result.trackPointsSaved() ).isEqualTo( 1 );
+        assertThat( result.recordsSkipped() ).isEqualTo( 2 );
+
+        ArgumentCaptor<List<PilotTrackPoint>> captor = ArgumentCaptor.forClass( List.class );
+        verify( trackPointRepository ).saveAll( captor.capture() );
+        assertThat( captor.getValue() ).singleElement()
+            .extracting( PilotTrackPoint::getCallsign ).isEqualTo( "DLH400" );
+    }
+
+    @Test
+    void skipsControllersWithoutALogonTime() {
+        VatsimController invalid = new VatsimController(
+            111222L, "EDDF_TWR", "119.900", 4, 50, null, null, null );
+        when( feedClient.fetchCurrent() ).thenReturn( new VatsimDataFeed( List.of(), List.of( invalid ) ) );
+
+        PollResult result = poller.pollOnce();
+
+        assertThat( result.atcSnapshotsSaved() ).isZero();
+        assertThat( result.recordsSkipped() ).isEqualTo( 1 );
+    }
+
+    @Test
+    void returnsAnEmptyResultWithoutThrowingWhenPersistenceFails() {
+        VatsimPilot pilot = new VatsimPilot(
+            1L, "DLH400", 50.0, 8.5, 3000, 180, 270, "2000", 1013, Instant.now(), null );
+        when( feedClient.fetchCurrent() ).thenReturn( new VatsimDataFeed( List.of( pilot ), List.of() ) );
+        when( trackPointRepository.saveAll( org.mockito.ArgumentMatchers.any() ) )
+            .thenThrow( new org.springframework.dao.DataAccessResourceFailureException( "db down" ) );
+
+        PollResult result = poller.pollOnce();
+
+        assertThat( result ).isEqualTo( PollResult.EMPTY );
+        verify( eventPublisher, org.mockito.Mockito.never() ).publishEvent( org.mockito.ArgumentMatchers.any() );
+    }
+
+    @Test
     void returnsAnEmptyResultWithoutThrowingWhenTheFeedFails() {
         when( feedClient.fetchCurrent() ).thenThrow( new VatsimFeedException( "boom", null ) );
 

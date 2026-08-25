@@ -16,7 +16,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -41,7 +40,19 @@ public class IngestionPoller {
         pollOnce();
     }
 
-    @Transactional
+    /**
+     * Runs a single poll cycle.
+     * <p>
+     * Deliberately <strong>not</strong> {@code @Transactional}: the scheduled {@link #poll()} entry
+     * point invokes this method on {@code this}, which Spring's AOP proxy never intercepts, so an
+     * annotation here would silently have no effect in production. Instead the transaction
+     * boundaries live where they are genuinely proxied and where the spec wants them:
+     * {@code saveAll(..)} on the raw-data repositories is transactional in Spring Data's
+     * {@code SimpleJpaRepository}, and {@code PilotSessionOrchestrator#processTrackPoints} /
+     * {@code AtcSessionTracker#processSnapshots} carry their own {@code @Transactional} on separate
+     * beans. That also gives the ordering the design demands: raw data is committed <em>before</em>
+     * any derivation runs, so a failure in the derivation logic can never roll back raw data.
+     */
     public PollResult pollOnce() {
         VatsimDataFeed feed;
         try {
@@ -57,6 +68,17 @@ public class IngestionPoller {
         List<PilotTrackPoint> trackPoints = new ArrayList<>();
         for( VatsimPilot pilot : feed.pilots() ) {
             if( pilot.callsign() == null || pilot.callsign().isBlank() ) {
+                log.debug( "Skipping pilot record without callsign (cid={})", pilot.cid() );
+                skipped++;
+                continue;
+            }
+            if( pilot.logonTime() == null ) {
+                log.debug( "Skipping pilot record without logon_time (callsign={})", pilot.callsign() );
+                skipped++;
+                continue;
+            }
+            if( isImplausiblePosition( pilot.latitude(), pilot.longitude() ) ) {
+                log.debug( "Skipping pilot record without a usable position (callsign={})", pilot.callsign() );
                 skipped++;
                 continue;
             }
@@ -66,26 +88,48 @@ public class IngestionPoller {
         List<AtcSnapshot> atcSnapshots = new ArrayList<>();
         for( VatsimController controller : feed.controllers() ) {
             if( controller.callsign() == null || controller.callsign().isBlank() ) {
+                log.debug( "Skipping controller record without callsign (cid={})", controller.cid() );
+                skipped++;
+                continue;
+            }
+            if( controller.logonTime() == null ) {
+                log.debug( "Skipping controller record without logon_time (callsign={})", controller.callsign() );
                 skipped++;
                 continue;
             }
             atcSnapshots.add( toAtcSnapshot( controller, recordedAt ) );
         }
 
-        if( !trackPoints.isEmpty() ) {
-            trackPointRepository.saveAll( trackPoints );
-        }
-        if( !atcSnapshots.isEmpty() ) {
-            atcSnapshotRepository.saveAll( atcSnapshots );
-        }
+        try {
+            if( !trackPoints.isEmpty() ) {
+                trackPointRepository.saveAll( trackPoints );
+            }
+            if( !atcSnapshots.isEmpty() ) {
+                atcSnapshotRepository.saveAll( atcSnapshots );
+            }
 
-        if( !trackPoints.isEmpty() ) {
+            // Always invoked, even with an empty list: both components use the call to detect which
+            // participants disappeared from the feed and must have their sessions closed.
             sessionOrchestrator.processTrackPoints( trackPoints );
+            atcSessionTracker.processSnapshots( atcSnapshots );
+        } catch( Exception e ) {
+            // Per the design spec, a transient persistence failure ("DB kurzzeitig nicht erreichbar")
+            // logs and skips the cycle rather than propagating into the scheduler.
+            log.error( "Skipping poll cycle: failed to persist or process the fetched feed data", e );
+            return PollResult.EMPTY;
         }
-        atcSessionTracker.processSnapshots( atcSnapshots );
 
         eventPublisher.publishEvent( new PollCycleSucceededEvent( recordedAt ) );
         return new PollResult( trackPoints.size(), atcSnapshots.size(), skipped );
+    }
+
+    /**
+     * VATSIM's feed maps a missing {@code latitude}/{@code longitude} to the {@code double} default
+     * {@code 0.0}, which is indistinguishable from Null Island. No real VATSIM pilot sits at exactly
+     * 0/0, so treating that pair as "position missing" is the safe reading.
+     */
+    private boolean isImplausiblePosition( double latitude, double longitude ) {
+        return latitude == 0.0 && longitude == 0.0;
     }
 
     private PilotTrackPoint toTrackPoint( VatsimPilot pilot, Instant recordedAt ) {
