@@ -53,6 +53,26 @@ Infrastruktur).
 - Bei statsim in der Navigation vorhanden, Detailseite beim Scan nicht direkt
   erreichbar (404) — vermutlich pro Flug/Event statt globale Seite
 
+### Offener Punkt: Kartenkachel-Quelle (Tiles) für Heatmaps und Replay
+
+Im Projekt-CLAUDE.md ist nur die Rendering-Bibliothek entschieden (MapLibre
+GL JS + deck.gl/TripsLayer), aber noch **keine konkrete Tile-Quelle**. Zur
+Auswahl stehen:
+
+- **MapTiler Cloud** (Freemium, fertige Vector-Styles auf OSM-Basis)
+- **Stadia Maps** (Freemium, ähnlich)
+- **OpenFreeMap** (kostenlos, selbst hostbar, kein API-Key nötig)
+- **Selbst gehosteter Tileserver** (z. B. OpenMapTiles + tileserver-gl,
+  voller Aufwand, volle Kontrolle)
+
+Relevant für unsere DSGVO-Überlegungen (Abschnitt 7): Bei
+Drittanbieter-Tile-Quellen wird bei jedem Kartenausschnitt die IP-Adresse
+des Nutzers an den Anbieter übertragen (vergleichbar mit eingebetteten
+Google Fonts/Google Maps) — müsste dann in die Datenschutzerklärung als
+Drittanbieter-Datenübermittlung. Da wir explizit kein Tracking wollen, wäre
+eine selbst gehostete Lösung (OpenFreeMap oder eigener Tileserver) die
+sauberste Option, dafür mit mehr Infrastrukturaufwand verbunden.
+
 ## 6. Plattform / Meta
 
 - Öffentliche API für Entwickler
