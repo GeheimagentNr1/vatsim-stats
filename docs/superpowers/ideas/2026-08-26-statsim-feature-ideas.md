@@ -65,15 +65,84 @@ Infrastruktur).
 Ausdrücklich **kein** Analytics/Tracking auf der Seite geplant — die
 folgenden Punkte betreffen ausschließlich die Erhebung/Speicherung der
 VATSIM-Daten selbst (CID, Callsign, Positionsverlauf, Session-Zeiten), die
-bereits im Ingestion-Modul passiert, unabhängig von einer öffentlichen UI:
+bereits im Ingestion-Modul passiert, unabhängig von einer öffentlichen UI.
 
-- Impressum
-- Datenschutzerklärung (Pflicht wegen Speicherung von CID/Callsign/
-  Positionsdaten, Art. 13 DSGVO)
-- Rechtsgrundlage dokumentieren (voraussichtlich berechtigtes Interesse,
-  Art. 6 Abs. 1 lit. f DSGVO)
-- Lösch-/Aufbewahrungskonzept für Rohdaten (Trackpoints)
-- Opt-out-/Auskunfts-/Löschmechanismus pro VATSIM-ID (Art. 15/17/21 DSGVO)
+### DSGVO-Grundlage
+
+Nicht die Anzeige/Statistik-Seite ist das DSGVO-Thema, sondern schon die
+Erhebung und dauerhafte Speicherung der VATSIM-Daten in unserer eigenen DB:
+
+- VATSIM-CID + Callsign + Positionsverlauf sind personenbezogene Daten
+  (Art. 4 Nr. 1 DSGVO) — die CID ist ein pseudonymes, aber eindeutig einer
+  natürlichen Person zuordenbares Kennzeichen.
+- Rechtsgrundlage: voraussichtlich berechtigtes Interesse
+  (Art. 6 Abs. 1 lit. f DSGVO) — muss in der Datenschutzerklärung begründet
+  werden (Interessenabwägung).
+- Betroffenenrechte müssen umsetzbar sein: Auskunft (Art. 15), Löschung
+  (Art. 17), Widerspruch (Art. 21) — praktisch ein Opt-out-/
+  Auskunfts-/Löschmechanismus pro VATSIM-ID.
+- Lösch-/Aufbewahrungskonzept für Rohdaten (Trackpoints) nötig, z. B.
+  Zeitgrenze für Rohdaten, danach nur aggregiert/anonymisiert.
+- Server-/Zugriffslogs (IP-Adressen) sind ebenfalls personenbezogen und
+  gehören mit Löschfrist in die Datenschutzerklärung.
+- Dass VATSIM die Daten öffentlich über die eigene API bereitstellt,
+  befreit uns nicht von unserer eigenen Verantwortlichkeit als
+  "Verantwortlicher" für die Weiterverarbeitung/Speicherung/Darstellung.
+- DSGVO-Haftung (Art. 82) ist verschuldensunabhängig und unabhängig davon,
+  ob das Projekt kommerziell betrieben wird oder nicht.
+
+### Benötigte Seiten
+
+Rechtlich zwingend sind nur zwei Seiten:
+
+- **Impressum** (Pflicht nach § 5 DDG, ehem. TMG, auch bei
+  nicht-kommerziellen Projekten sobald öffentlich erreichbar)
+- **Datenschutzerklärung** (Pflicht nach Art. 13 DSGVO)
+
+Eine eigene "Rechtliche Hinweise"-Seite ist **keine** eigenständige Pflicht.
+Üblich, aber ins Impressum integrierbar statt eigener Seite:
+
+- Haftungsausschluss/Disclaimer (externe Links, Richtigkeit der
+  Statistikdaten)
+- Urheberrechtshinweis für eigene Inhalte/Karten/Grafiken
+- Non-Affiliation-Hinweis ("nicht offiziell mit VATSIM verbunden") — gehört
+  in Impressum oder Footer, keine eigene Seite nötig
+
+Eine zusätzliche eigene Seite ist nur sinnvoll, falls die öffentliche API
+(Punkt 6) umgesetzt wird → dann eigene Nutzungsbedingungen/ToS für die API
+(Rate Limits, erlaubte Nutzung, Verfügbarkeits-Disclaimer), losgelöst vom
+allgemeinen "rechtliche Hinweise"-Thema.
+
+### Haftungsausschluss für die API
+
+Nicht kommerziell zu sein befreit nicht automatisch von Haftung — es gibt
+keine Regel im deutschen Recht, die private/unentgeltliche Angebote
+grundsätzlich davon ausnimmt (§ 280, § 823 BGB gelten grundsätzlich auch
+hier; die BGH-Rechtsprechung zu reduzierter Haftung bei unentgeltlichen
+"Gefälligkeitsverhältnissen" ist eine Auslegungsfrage im Einzelfall, kein
+verlässlicher Schutz). Ein expliziter Haftungsausschluss ist deshalb
+empfehlenswert (kein separates Dokument nötig — ein kurzer Absatz im
+Impressum oder in der API-Doku reicht): Daten ohne Gewähr, keine Garantie
+für Verfügbarkeit/Richtigkeit, Nutzung auf eigenes Risiko, Haftung
+ausgeschlossen außer bei Vorsatz/grober Fahrlässigkeit. Vergleichbar mit dem
+"AS IS, WITHOUT WARRANTY"-Standardsatz in Open-Source-Lizenzen (MIT,
+Apache).
+
+### Tools zur Texterstellung (auch für englische Texte)
+
+- **iubenda** — empfohlen für unseren Fall: internationale Ausrichtung,
+  generiert Texte in 27 Sprachen inkl. Englisch bei Firmensitz Deutschland,
+  DSGVO-Klauseln, Anwaltsteam im Hintergrund. Passt zu unserem primär
+  englischsprachigen, aber rechtlich in Deutschland verankerten Projekt.
+- **eRecht24** — deutscher Marktführer, kostenlose Basis-Generatoren für
+  Impressum/Datenschutzerklärung, englische Versionen nur im Premium-Abo,
+  primär deutschsprachig ausgerichtet.
+- Beide Tools ersetzen keine Rechtsberatung im engeren Sinne — Antworten in
+  den Fragebögen müssen zur tatsächlichen technischen Architektur passen
+  (TimescaleDB-Retention, Ingestion-Frequenz etc.); vor Public-Go-Live
+  Gegenlesen durch Fachanwalt für IT-Recht/Datenschutzrecht empfohlen,
+  insbesondere wegen der Personenbezug-Frage bei VATSIM-Daten und weil
+  Impressum-Fehler in Deutschland ein klassisches Abmahn-Ziel sind.
 
 Keine Rechtsberatung — vor Public-Go-Live mit tatsächlicher juristischer
 Prüfung abgleichen.
